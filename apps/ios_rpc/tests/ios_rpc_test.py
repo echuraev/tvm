@@ -30,7 +30,7 @@ from tvm.contrib import utils, xcode
 import numpy as np
 
 # Set to be address of tvm proxy.
-proxy_host = os.environ["TVM_IOS_RPC_PROXY_HOST"]
+proxy_host = os.environ["TVM_TRACKER_HOST"]
 # Set your desination via env variable.
 # Should in format "platform=iOS,id=<the test device uuid>"
 destination = os.environ["TVM_IOS_RPC_DESTINATION"]
@@ -67,7 +67,8 @@ def test_rpc_module():
     # Build the dynamic lib.
     # If we don't want to do metal and only use cpu, just set target to be target
     f = tvm.build(s, [A, B], "metal", target_host=target, name="myadd")
-    path_dso1 = temp.relpath("dev_lib.dylib")
+    path_dso1 = "dev_lib.dylib"
+    print("path_dso1: " + path_dso1)
     f.export_library(path_dso1, xcode.create_dylib, arch=arch, sdk=sdk)
     xcode.codesign(path_dso1)
 
@@ -77,8 +78,9 @@ def test_rpc_module():
     s[B].pragma(xo, "parallel_launch_point")
     s[B].pragma(xi, "parallel_barrier_when_finish")
     f = tvm.build(s, [A, B], target, name="myadd_cpu")
-    path_dso2 = temp.relpath("cpu_lib.dylib")
+    path_dso2 = "cpu_lib.dylib"
     f.export_library(path_dso2, xcode.create_dylib, arch=arch, sdk=sdk)
+    print("path_dso2: " + path_dso2)
     xcode.codesign(path_dso2)
 
     # Start RPC test server that contains the compiled library.
@@ -87,7 +89,10 @@ def test_rpc_module():
     )
 
     # connect to the proxy
-    remote = rpc.connect(proxy_host, proxy_port, key=key)
+    #remote = rpc.connect(proxy_host, proxy_port, key=key)
+    tracker = rpc.connect_tracker(proxy_host, proxy_port)
+    remote = tracker.request(key, priority=0, session_timeout=60)
+
     ctx = remote.metal(0)
     f1 = remote.load_module("dev_lib.dylib")
     a_np = np.random.uniform(size=1024).astype(A.dtype)

@@ -34,7 +34,7 @@ from PIL import Image
 import coremltools
 
 # Set to be address of tvm proxy.
-proxy_host = os.environ["TVM_IOS_RPC_PROXY_HOST"]
+proxy_host = os.environ["TVM_TRACKER_HOST"]
 # Set your desination via env variable.
 # Should in format "platform=iOS,id=<the test device uuid>"
 destination = os.environ["TVM_IOS_RPC_DESTINATION"]

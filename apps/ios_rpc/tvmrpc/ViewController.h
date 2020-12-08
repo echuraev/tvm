@@ -33,10 +33,16 @@
   std::string recvBuffer_;
   // Whether connection is initialized.
   bool initialized_;
+  // Whether application is registered in rpc_tracker.
+  bool registered_;
+  bool registering_;
+
   // Whether auto reconnect when a session is done.
   bool auto_reconnect_;
   // The key of the server.
   std::string key_;
+  std::string matchKey_;
+  int port_;
   // Initial bytes to be send to remote
   std::string initBytes_;
   // Send pointer of initial bytes.

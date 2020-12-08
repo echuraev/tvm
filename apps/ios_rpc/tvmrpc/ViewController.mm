@@ -26,6 +26,21 @@
 
 @implementation ViewController
 
+enum TrackerCode {
+  PUT = 3,
+  UPDATE_INFO = 5,
+  GET_PENDING_MATCHKEYS = 7,
+  SUCCESS = 0
+};
+
+std::string generateUpdateInfoJson(std::string key) {
+  return "[" + std::to_string(TrackerCode::UPDATE_INFO) + ", {\"key\": \"" + key + "\"}]";
+}
+std::string generatePutInfoJson(std::string key, int serverPort, std::string matchKey) {
+  return "[" + std::to_string(TrackerCode::PUT) + ", \"" + key + "\", [" + std::to_string(serverPort) + ", "
+              + "\"" + matchKey +  "\"], null]";
+}
+
 - (void)stream:(NSStream*)strm handleEvent:(NSStreamEvent)event {
   std::string buffer;
   switch (event) {
@@ -61,20 +76,31 @@
 }
 
 - (void)onReadAvailable {
+  NSLog(@"onReadAvailable");
+  // Magic header for RPC data plane
   constexpr int kRPCMagic = 0xff271;
-  if (!initialized_) {
+  // magic header for RPC tracker(control plane)
+  constexpr int kRPCTrackerMagic = 0x2f271;
+  // sucess response
+  constexpr int kRPCSuccess = kRPCMagic + 0;
+  // cannot found matched key in server
+  constexpr int kRPCMismatch = kRPCMagic + 2;
+  constexpr int kBufferSize = 4 << 10;
+  if (!initialized_/* || registering_*/) {
+    registering_ = false;
     int code;
     size_t nbytes = [inputStream_ read:reinterpret_cast<uint8_t*>(&code) maxLength:sizeof(code)];
     if (nbytes != sizeof(code)) {
       self.infoText.text = @"Fail to receive remote confirmation code.";
       [self close];
-    } else if (code == kRPCMagic + 2) {
+    } else if (code == kRPCMismatch) {
       self.infoText.text = @"Proxy server cannot find client that matches the key";
       [self close];
     } else if (code == kRPCMagic + 1) {
       self.infoText.text = @"Proxy server already have another server with same key";
       [self close];
-    } else if (code != kRPCMagic) {
+    //} else if (code != kRPCMagic) {
+    } else if (code != kRPCTrackerMagic) {
       self.infoText.text = @"Given address is not a TVM RPC Proxy";
       [self close];
     } else {
@@ -82,9 +108,19 @@
       self.statusLabel.text = @"Proxy connected.";
       ICHECK(handler_ != nullptr);
     }
-  }
-  const int kBufferSize = 4 << 10;
-  if (initialized_) {
+  /*} else if (initialized_ && !registered_) {
+    int recvCode;
+    size_t nbytes = [inputStream_ read:reinterpret_cast<uint8_t*>(&recvCode) maxLength:sizeof(recvCode)];
+    if (nbytes != sizeof(recvCode)) {
+      self.infoText.text = @"Fail to receive remote confirmation code.";
+      [self close];
+    } else if (recvCode != kRPCSuccess) {
+      self.infoText.text = @"Cannot register app in rpc_tracker";
+      [self close];
+    } else {
+      registered_ = true;
+    }*/
+  } else if (initialized_/* && registered_*/) {
     while ([inputStream_ hasBytesAvailable]) {
       recvBuffer_.resize(kBufferSize);
       uint8_t* bptr = reinterpret_cast<uint8_t*>(&recvBuffer_[0]);
@@ -112,11 +148,31 @@
 }
 
 - (void)onWriteAvailable {
+  NSLog(@"onWriteAvailable");
   if (initSendPtr_ < initBytes_.length()) {
     initSendPtr_ += [outputStream_ write:reinterpret_cast<uint8_t*>(&initBytes_[initSendPtr_])
                                maxLength:(initBytes_.length() - initSendPtr_)];
-  }
-  if (initialized_) {
+  } else if (!initialized_/* && !registered_*/) {
+    std::ostringstream os;
+    std::string key = generateUpdateInfoJson("server:" + key_);
+    int keylen = static_cast<int>(key.length());
+    os.write(reinterpret_cast<char*>(&keylen), sizeof(keylen));
+    os.write(key.c_str(), key.length());
+    std::string keyBytes = os.str();
+    [outputStream_ write:reinterpret_cast<uint8_t*>(&keyBytes[0])
+               maxLength:(keyBytes.length())];
+  } else if (!registered_ && !registering_) {
+    std::ostringstream os;
+    constexpr int serverPort = 5001;
+    std::string key = generatePutInfoJson(key_, serverPort, matchKey_);
+    int keylen = static_cast<int>(key.length());
+    os.write(reinterpret_cast<char*>(&keylen), sizeof(keylen));
+    os.write(key.c_str(), key.length());
+    std::string keyBytes = os.str();
+    [outputStream_ write:reinterpret_cast<uint8_t*>(&keyBytes[0])
+               maxLength:(keyBytes.length())];
+    registering_ = true;
+  } else {
     try {
       std::string dummy;
       int flag = handler_(dummy, 2);
@@ -130,25 +186,38 @@
 }
 
 - (void)open {
+  // Magic header for RPC data plane
   constexpr int kRPCMagic = 0xff271;
+  // magic header for RPC tracker(control plane)
+  constexpr int kRPCTrackerMagic = 0x2f271;
+  // sucess response
+  constexpr int kRPCSuccess = kRPCMagic + 0;
+  // cannot found matched key in server
+  constexpr int kRPCMismatch = kRPCMagic + 2;
+
   NSLog(@"Connecting to the proxy server..");
   // Initialize the data states.
   key_ = [self.proxyKey.text UTF8String];
-  key_ = "server:" + key_;
+  //key_ = "server:" + key_; // Add randomize key
+  matchKey_ = key_ + ":" + std::to_string(((double)arc4random() / UINT32_MAX));
   std::ostringstream os;
   int rpc_magic = kRPCMagic;
+  rpc_magic = kRPCTrackerMagic;
   os.write(reinterpret_cast<char*>(&rpc_magic), sizeof(rpc_magic));
-  int keylen = static_cast<int>(key_.length());
-  os.write(reinterpret_cast<char*>(&keylen), sizeof(keylen));
-  os.write(key_.c_str(), key_.length());
+  //int keylen = static_cast<int>(key_.length());
+  //os.write(reinterpret_cast<char*>(&keylen), sizeof(keylen));
+  //os.write(key_.c_str(), key_.length());
   initialized_ = false;
+  registered_ = false;
+  registering_ = false;
   initBytes_ = os.str();
   initSendPtr_ = 0;
   // Initialize the network.
   CFReadStreamRef readStream;
   CFWriteStreamRef writeStream;
+  port_ = [self.proxyPort.text intValue];
   CFStreamCreatePairWithSocketToHost(NULL, (__bridge CFStringRef)self.proxyURL.text,
-                                     [self.proxyPort.text intValue], &readStream, &writeStream);
+                                     port_, &readStream, &writeStream);
   inputStream_ = (__bridge_transfer NSInputStream*)readStream;
   outputStream_ = (__bridge_transfer NSOutputStream*)writeStream;
   [inputStream_ setDelegate:self];
