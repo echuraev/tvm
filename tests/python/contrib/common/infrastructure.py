@@ -25,14 +25,13 @@ import tvm
 from tvm import relay
 from tvm import rpc
 from tvm.contrib import graph_runtime
-from tvm.relay import transform
 from tvm.relay.op.contrib import bnns
 from tvm.contrib import utils
 from tvm.autotvm.measure import request_remote
 
 class Device:
     """
-    Configuration for Arm Compute Library tests.
+    Common device configuration for python tests.
 
     Check tests/python/contrib/arm_compute_lib/ for the presence of an test_config.json file.
     This file can be used to override the default configuration here which will attempt to run the Arm
@@ -71,7 +70,7 @@ class Device:
     connection_type = "local"
     host = "localhost"
     port = 9090
-    target = "llvm -mtriple=x86_64-apple-darwin20.1.0"
+    target = "llvm"
     device_key = ""
     cross_compile = ""
 
@@ -106,7 +105,7 @@ class Device:
         config_file = os.path.join(location, file_name)
         if not os.path.exists(config_file):
             warnings.warn(
-                "Config file doesn't exist, resuming BNNS tests with default config."
+                "Config file doesn't exist, resuming tests with default config."
             )
             return
         with open(config_file, mode="r") as config:
@@ -139,58 +138,14 @@ def get_cpu_op_count(mod):
     return c.count
 
 
-def skip_runtime_test():
-    """Skip test if it requires the runtime and it's not present."""
-    # BNNS codegen not present.
-    if not tvm.get_global_func("relay.ext.bnns", True):
-        print("Skip because BNNS codegen is not available.")
-        return True
-
-    # Remote device is in use or ACL runtime not present
-    # Note: Ensure that the device config has been loaded before this check
-    #if (
-    #    not Device.connection_type != "local"
-    #    and not arm_compute_lib.is_arm_compute_runtime_enabled()
-    #):
-    #    print("Skip because runtime isn't present or a remote device isn't being used.")
-    #    return True
-
-
-def skip_codegen_test():
-    """Skip test if it requires the ACL codegen and it's not present."""
-    if not tvm.get_global_func("relay.ext.bnns", True):
-        print("Skip because BNNS codegen is not available.")
-        return True
-
-
-def build_module(mod, target, params=None, enable_bnns=True, tvm_ops=0, acl_partitions=1):
-    """Build module with option to build for ACL."""
-    if isinstance(mod, tvm.relay.expr.Call):
-        mod = tvm.IRModule.from_expr(mod)
-    with tvm.transform.PassContext(opt_level=3, disabled_pass=["AlterOpLayout"]):
-        if enable_bnns:
-            target_annotation_pass = tvm.transform.Sequential(
-                [
-                    transform.InferType(),
-                    transform.FoldConstant(),
-                    transform.FoldScaleAxis(),
-                    transform.AnnotateTarget('bnns'),
-                    transform.MergeCompilerRegions(),
-                    transform.PartitionGraph(),
-                ]
-            )
-            mod = target_annotation_pass(mod)
-        relay.backend.compile_engine.get().clear()
-        return relay.build(mod, target=target, params=params)
-
-
 def build_and_run(
     mod,
     inputs,
     outputs,
     params,
     device,
-    enable_bnns=True,
+    build_module_cb,
+    enable_framework=True,
     no_runs=1,
     tvm_ops=0,
     acl_partitions=1,
@@ -201,7 +156,7 @@ def build_and_run(
         config = {}
 
     try:
-        lib = build_module(mod, device.target, params, enable_bnns, tvm_ops, acl_partitions)
+        lib = build_module_cb(mod, device.target, params, enable_framework, tvm_ops, acl_partitions)
     except Exception as e:
         err_msg = "The module could not be built.\n"
         if config:
@@ -259,46 +214,6 @@ def verify(answers, atol, rtol, verify_saturation=False, config=None):
                     err_msg += f"The test failed with the following parameters: {config}\n"
                 err_msg += str(e)
                 raise AssertionError(err_msg)
-
-
-def extract_acl_modules(module):
-    """Get the ACL module(s) from llvm module."""
-    return list(
-        filter(lambda mod: mod.type_key == "arm_compute_lib", module.get_lib().imported_modules)
-    )
-
-
-def verify_codegen(
-    module,
-    known_good_codegen,
-    num_acl_modules,
-    tvm_ops=0,
-    target="llvm -mtriple=aarch64-linux-gnu -mattr=+neon",
-):
-    """Check acl codegen against a known good output."""
-    module = build_module(module, target, tvm_ops=tvm_ops, acl_partitions=num_acl_modules)
-    acl_modules = extract_acl_modules(module)
-
-    assert len(acl_modules) == num_acl_modules, (
-        f"The number of Arm Compute Library modules produced ({len(acl_modules)}) does not "
-        f"match the expected value ({num_acl_modules})."
-    )
-
-    for mod in acl_modules:
-        source = mod.get_source("json")
-        codegen = json.loads(source)["nodes"]
-        # remove input and const names as these cannot be predetermined
-        for node in range(len(codegen)):
-            if codegen[node]["op"] == "input" or codegen[node]["op"] == "const":
-                codegen[node]["name"] = ""
-        codegen_str = json.dumps(codegen, sort_keys=True, indent=2)
-        known_good_codegen_str = json.dumps(known_good_codegen, sort_keys=True, indent=2)
-
-        assert codegen_str == known_good_codegen_str, (
-            f"The JSON produced by codegen does not match the expected result. \n"
-            f"Actual={codegen_str} \n"
-            f"Expected={known_good_codegen_str}"
-        )
 
 
 def generate_trials(space, r_factor=3):

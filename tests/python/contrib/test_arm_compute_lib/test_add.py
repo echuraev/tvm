@@ -22,14 +22,17 @@ import tvm
 import tvm.testing
 from tvm import relay
 
-from test_arm_compute_lib.infrastructure import (
-    skip_runtime_test,
-    skip_codegen_test,
+from common.infrastructure import (
     build_and_run,
     verify,
+)
+from .infrastructure import Device
+from .infrastructure import (
+    skip_runtime_test,
+    skip_codegen_test,
+    build_module,
     verify_codegen,
 )
-from test_arm_compute_lib.infrastructure import Device
 
 _qnn_params = {
     "lhs_scale": relay.const(0.0156863, "float32"),
@@ -100,7 +103,7 @@ def test_runtime_add():
             outputs = []
             func = _get_model(shape, dtype, iter(inputs), op, op_params)
             for acl in [True, False]:
-                outputs.append(build_and_run(func, inputs, 1, None, device, enable_acl=acl)[0])
+                outputs.append(build_and_run(func, inputs, 1, None, device, build_module, enable_framework=acl)[0])
 
             config = {
                 "shape": shape,

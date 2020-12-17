@@ -25,14 +25,16 @@ import tvm
 from tvm import relay
 
 from common.infrastructure import (
-    skip_runtime_test,
-    skip_codegen_test,
     build_and_run,
     verify,
-    verify_codegen,
     generate_trials,
 )
-from common.infrastructure import Device
+from .infrastructure import Device
+from .infrastructure import (
+    skip_runtime_test,
+    skip_codegen_test,
+    build_module,
+)
 
 def _get_model(
     shape,
@@ -138,7 +140,7 @@ def test_conv2d():
             has_activation=composite[2],
         )
         for bnns in [False, True]:
-            outputs.append(build_and_run(func, inputs, 1, params, device, enable_bnns=bnns)[0])
+            outputs.append(build_and_run(func, inputs, 1, params, device, build_module, enable_framework=bnns)[0])
 
         config = {
             "shape": shape,

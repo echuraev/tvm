@@ -22,12 +22,15 @@ import tvm
 from tvm import relay
 from tvm import testing
 
+from common.infrastructure import (
+    build_and_run,
+    verify,
+)
 from .infrastructure import (
     skip_runtime_test,
     skip_codegen_test,
-    build_and_run,
-    verify,
     verify_codegen,
+    build_module,
 )
 from .infrastructure import Device
 
@@ -81,7 +84,7 @@ def test_reshape():
             outputs = []
             func = _get_model(inputs["a"].shape, new_shape, dtype, iter(inputs))
             for acl in [False, True]:
-                outputs.append(build_and_run(func, inputs, 1, None, device, enable_acl=acl)[0])
+                outputs.append(build_and_run(func, inputs, 1, None, device, build_module, enable_framework=acl)[0])
 
             config = {
                 "new shape": inputs["a"].shape,

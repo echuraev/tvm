@@ -21,12 +21,16 @@ import numpy as np
 import tvm
 from tvm import relay
 
-from test_arm_compute_lib.infrastructure import (
-    skip_runtime_test,
-    skip_codegen_test,
+from common.infrastructure import (
     build_and_run,
     verify,
+    generate_trials,
+)
+from .infrastructure import (
+    skip_runtime_test,
+    skip_codegen_test,
     verify_codegen,
+    build_module,
 )
 from test_arm_compute_lib.infrastructure import Device
 
@@ -356,7 +360,7 @@ def test_conv2d():
             has_activation=composite[2],
         )
         for acl in [False, True]:
-            outputs.append(build_and_run(func, inputs, 1, params, device, enable_acl=acl)[0])
+            outputs.append(build_and_run(func, inputs, 1, params, device, build_module, enable_framework=acl)[0])
 
         config = {
             "shape": shape,
@@ -508,7 +512,7 @@ def test_qnn_conv2d():
             has_activation=composite[2],
         )
         for acl in [False, True]:
-            outputs.append(build_and_run(func, inputs, 1, params, device, enable_acl=acl)[0])
+            outputs.append(build_and_run(func, inputs, 1, params, device, build_module, enable_framework=acl)[0])
 
         config = {
             "shape": shape,

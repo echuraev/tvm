@@ -21,7 +21,11 @@ import numpy as np
 import tvm
 from tvm import relay
 
-from .infrastructure import skip_runtime_test, build_and_run, verify
+from common.infrastructure import (
+    build_and_run,
+    verify,
+)
+from .infrastructure import skip_runtime_test, build_module
 from .infrastructure import Device
 
 
@@ -52,7 +56,7 @@ def test_multiple_ops():
     for acl in [False, True]:
         func = get_model(inputs["a"].shape, iter(inputs))
         outputs.append(
-            build_and_run(func, inputs, 1, None, device, enable_acl=acl, acl_partitions=2)[0]
+            build_and_run(func, inputs, 1, None, device, build_module, enable_framework=acl, acl_partitions=2)[0]
         )
     verify(outputs, atol=0.002, rtol=0.01)
 
@@ -85,7 +89,7 @@ def test_heterogeneous():
         func = get_model(inputs["a"].shape, iter(inputs))
         outputs.append(
             build_and_run(
-                func, inputs, 1, None, device, enable_acl=acl, tvm_ops=1, acl_partitions=2
+                func, inputs, 1, None, device, build_module, enable_framework=acl, tvm_ops=1, acl_partitions=2
             )[0]
         )
     verify(outputs, atol=0.002, rtol=0.01)
@@ -124,7 +128,7 @@ def test_multiple_runs():
     }
 
     func, params = get_model()
-    outputs = build_and_run(func, inputs, 1, params, device, enable_acl=True, no_runs=3)
+    outputs = build_and_run(func, inputs, 1, params, device, build_module, enable_framework=True, no_runs=3)
     verify(outputs, atol=0.002, rtol=0.01)
 
 
