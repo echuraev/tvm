@@ -3,6 +3,7 @@ import tvm
 import tvm.relay as relay
 from tvm.relay import transform
 from tvm.contrib import graph_runtime
+from tvm.relay.op.contrib.register import get_pattern_table
 
 from tvm.relay.op.contrib.arm_compute_lib import partition_for_arm_compute_lib
 
@@ -87,6 +88,7 @@ def mod_partitioning(mod):
                 transform.InferType(),
                 transform.FoldConstant(),
                 transform.FoldScaleAxis(),
+                transform.MergeComposite(get_pattern_table(target_name)),
                 transform.AnnotateTarget(target_name),
                 transform.MergeCompilerRegions(),
                 transform.PartitionGraph(),
