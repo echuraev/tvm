@@ -34,6 +34,16 @@
 
 #include "Accelerate/Accelerate.h"
 
+template<typename T1, typename T2>
+bool one_of(T1 arg1, T2 arg2) {
+  return arg1 == arg2;
+}
+
+template<typename T1, typename T2, typename ...T>
+bool one_of(T1 arg1, T2 arg2, T... args) {
+  return arg1 == arg2 || one_of(arg1, args...);
+}
+
 namespace tvm {
 namespace runtime {
 namespace contrib {
@@ -43,19 +53,78 @@ using namespace tvm::runtime::json;
 
 /** C++ wrapper on top of original BNNS C api */
 namespace BNNS {
-  using Dim = int64_t;
-  using Shape = std::vector<int64_t>;
+  using Dim = size_t;
+  using Shape = std::vector<Dim>;
   using Dtype = BNNSDataType;
+
+  void* default_alloc(size_t size) {
+    // TODO: make it aligned with cash line
+    return malloc(size);
+  }
+
+  void default_free(void* ptr) {
+    free(ptr);
+  }
 
   class Tensor {
    public:
+    Tensor(Shape shape, Dtype dtype, void* hdl):real_shape(shape) {
+      ICHECK(one_of(shape.size(), 3, 4));
+      const auto dim_shift = (shape.size() == 4) ? 1 : 0;
+      const size_t N = dim_shift ? shape[0] : 1;
+      const size_t C = shape[dim_shift + 0];
+      const size_t H = shape[dim_shift + 1];
+      const size_t W = shape[dim_shift + 2];
+      bnns_desc = {
+          W,     /* width */
+          H,     /* height */
+          C,     /* channels */
+          W,     /* row_stride */
+          H*W,   /* image_stride */
+          dtype, /* data_type */
+          1.,    /* data_scale */
+          0.     /* data_bias */
+      };
+
+      if (hdl) {
+        data_handler = hdl;
+        is_external_data = true;
+      } else {
+        const size_t elem_size = (dtype & 0xFFFF) / 4;
+        data_handler = default_alloc(N * C * H * W * elem_size);
+        is_external_data = false;
+      }
+    }
+
+    ~Tensor() {
+      if (data_handler && !is_external_data) {
+        default_free(data_handler);
+        data_handler = nullptr;
+      }
+    }
+
+    Dtype get_data_type() const { return bnns_desc.data_type; }
+    size_t get_elem_size() const { return bnns_desc.data_type & 0xffff; }
+
     void* get_data_hdl() { return data_handler; }
     const void* get_data_hdl() const { return data_handler; };
 
+    const BNNSImageStackDescriptor& get_desc() const { return bnns_desc; };
+
+    BNNSLayerData get_bnns_layer_data() const {
+      return {
+          data_handler,         /* data */
+          bnns_desc.data_type,  /* data_type */
+          bnns_desc.data_scale, /* data_scale */
+          bnns_desc.data_bias,  /* data_bias */
+          nullptr               /* data_table */
+      };
+    }
+
    private:
     Shape real_shape;
-    Dtype data_type;
     void* data_handler;
+    bool is_external_data = false;
     BNNSImageStackDescriptor bnns_desc;
   };
 
@@ -88,13 +157,11 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
   const char* type_key() const { return "bnns_json"; }
 
   void Init(const Array<NDArray>& consts) override {
+    SetupConstants(consts);
     BuildEngine();
 
-//    ICHECK_EQ(consts.size(), const_idx_.size())
-//        << "The number of input constants must match the number of required.";
-
-    // Setup constants entries for weights.
-    SetupConstants(consts);
+    ICHECK_EQ(consts.size(), const_idx_.size())
+        << "The number of input constants must match the number of required.";
   }
 
   void Run() override {
@@ -104,14 +171,14 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
       const DLTensor &dlt = *data_entry_[eid];
 
       size_t buffer_size = GetDataSize(dlt);
-      write_to_bnns_memory(dlt.data, buffer_size, entry_out_mem_[eid]);
+      write_to_bnns_memory(dlt.data, buffer_size, *entry_out_mem_[eid]);
     }
 
     // Invoke the engine through intepreting the stream.
     for (int i = 0; i < primitives_.size(); ++i) {
-      auto src = tensors_.at(prim_args_.at(i).first);
-      auto dst = tensors_.at(prim_args_.at(i).second);
-      primitives_.at(i).execute(src, dst);
+      auto src = entry_out_mem_.at(prim_args_.at(i).first);
+      auto dst = entry_out_mem_.at(prim_args_.at(i).second);
+      primitives_.at(i).execute(*src, *dst);
     }
 
     // Read output buffers.
@@ -120,7 +187,7 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
       const DLTensor &dlt = *data_entry_[eid];
 
       size_t buffer_size = GetDataSize(dlt);
-      read_from_dnnl_memory(dlt.data, buffer_size, entry_out_mem_[eid]);
+      read_from_dnnl_memory(dlt.data, buffer_size, *entry_out_mem_[eid]);
     }
   }
 
@@ -154,41 +221,33 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
     }
   }
 
-//  // Bind a JSON graph node entry to a DNNL memory.
-//  dnnl::memory BindDNNLMemory(const JSONGraphNodeEntry& entry, dnnl::memory::desc mem_desc,
-//                              size_t offset = 0) {
-//    auto eid = EntryID(entry);
-//    if (entry_out_mem_.count(eid) == 0) {
-//      return BindDNNLMemory(entry, dnnl::memory(mem_desc, engine_), offset);
-//    }
-//    return entry_out_mem_[eid].first;
-//  }
-//
-//  // Bind a JSON graph node entry to a given DNNL memory.
-//  dnnl::memory BindDNNLMemory(const JSONGraphNodeEntry& entry, dnnl::memory mem,
-//                              size_t offset = 0) {
-//    auto eid = EntryID(entry);
-//    // Since the DNNL memory has been created before calling this function, we assume the entry
-//    // has not yet been bound to the other DNNL memory; otherwise it may have memory leak.
-//    ICHECK_EQ(entry_out_mem_.count(eid), 0);
-//
-//    // TODO(@comanic): Support other data types (i.e., int8).
-//    auto data_node = nodes_[entry.id_];
-//    auto dltype = data_node.GetOpDataType()[entry.index_];
-//    ICHECK_EQ(dltype.bits, 32);
-//
-//    entry_out_mem_[eid] = {mem, offset};
-//    return entry_out_mem_[eid].first;
-//  }
-//
+  // Bind a JSON graph node entry to a BNNS tensor.
+  std::shared_ptr<BNNS::Tensor> BindBNNSTensor(const JSONGraphNodeEntry& entry, void *hdl = nullptr) {
+    auto eid = EntryID(entry);
+    if (entry_out_mem_.count(eid) == 0) {
+      auto data_node = nodes_[entry.id_];
+      auto dlshape = data_node.GetOpShape()[entry.index_];
+      auto dltype = data_node.GetOpDataType()[entry.index_];
+
+      entry_out_mem_[eid] = std::make_shared<BNNS::Tensor>(
+          BNNS::Shape{dlshape.begin(), dlshape.end()},
+          convertToBNNS(dltype), hdl);
+    }
+    return entry_out_mem_[eid];
+  }
+
   void Conv2d(const size_t& nid, const bool has_relu = false, const bool has_bias = false) {
     auto node = nodes_[nid];
 
     // Setup attributes.
-    auto data_entry = node.GetInputs()[0];
+    auto src_entry = node.GetInputs()[0];
     auto weight_entry = node.GetInputs()[1];
-    BNNS::Shape input_shape = nodes_[data_entry.id_].GetOpShape()[data_entry.index_];
-    BNNS::Shape weight_shape = nodes_[weight_entry.id_].GetOpShape()[weight_entry.index_];
+    auto dst_entry = JSONGraphNodeEntry(nid, 0);
+
+    auto dl_input_shape = nodes_[src_entry.id_].GetOpShape()[src_entry.index_];
+    auto dl_weight_shape = nodes_[weight_entry.id_].GetOpShape()[weight_entry.index_];
+    BNNS::Shape input_shape {dl_input_shape.begin(), dl_input_shape.end()};
+    BNNS::Shape weight_shape {dl_weight_shape.begin(), dl_weight_shape.end()};
     std::vector<std::string> str_strides = node.GetAttr<std::vector<std::string>>("strides");
     std::vector<std::string> str_padding = node.GetAttr<std::vector<std::string>>("padding");
     BNNS::Dim groups = std::stoi(node.GetAttr<std::vector<std::string>>("groups")[0]);
@@ -221,15 +280,40 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
     BNNS::Shape padding_dims_l = {PH_L, PW_L};
     BNNS::Shape padding_dims_r = {PH_R, PW_R};
 
+//    auto weight_ext_data_hdl = data_entry_[EntryID(weight_entry)]->data;
+
     // Memory descriptions.
-//    auto conv_src_md = dnnl::memory::desc(src_dims, dt::f32, tag::any);
-//    auto conv_weights_md = dnnl::memory::desc(weights_dims, dt::f32, tag::any);
-//    auto conv_bias_md = dnnl::memory::desc(bias_dims, dt::f32, tag::any);
-//    auto conv_dst_md = dnnl::memory::desc(dst_dims, dt::f32, tag::nchw);
+    auto src_md = BindBNNSTensor(src_entry);
+    auto weights_md = BindBNNSTensor(weight_entry);
+    auto dst_md = BindBNNSTensor(dst_entry);
+    // TODO [apeskov]: check correctness of tensor shapes
 
-    // Covn2d description.
-//    auto filer = BNNSConvolutionLayerParameters
+    BNNSLayerData no_layer_data {
+        nullptr,  /* data */
+        BNNSDataTypeFloat32, /* data_type */
+        1.,       /* data_scale */
+        0.,       /* data_bias */
+        nullptr   /* data_table */
+    };
 
+    BNNSConvolutionLayerParameters conv_param = {
+        SW ,  /* x_stride */
+        SH ,  /* y_stride */
+        PW_L, /* x_padding */  // TODO [apeskov]: Only symmetric pad case are supported
+        PH_L, /* y_padding */
+        KW,   /* k_width */
+        KH,   /* k_height */
+        IC,   /* in_channels */
+        OC,   /* out_channels */
+        weights_md->get_bnns_layer_data(), /* weights */
+        no_layer_data,                    /* bias */
+        {BNNSActivationFunctionIdentity}, /* activation */
+    };
+
+    auto filter = BNNSFilterCreateConvolutionLayer(&src_md->get_desc(), &dst_md->get_desc(),
+              &conv_param, &common_filter_param);
+    primitives_.emplace_back(filter);
+    prim_args_.push_back({EntryID(src_entry), EntryID(dst_entry)});
   }
 
   // Read from BNNS memory and write to the handle.
@@ -244,41 +328,33 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
     std::copy(reinterpret_cast<uint8_t*>(handle), reinterpret_cast<uint8_t*>(handle) + size,
               dst);
   }
-//
-//  // Generate DNNL memory description and infer the data layout by the given shape.
-//  inline dnnl::memory::desc GenDNNLMemDescByShape(const dnnl::memory::dims& shape, dt dtype) {
-//    dnnl::memory::desc data_md;
-//    switch (shape.size()) {
-//      case 1:
-//        data_md = dnnl::memory::desc({shape, dtype, tag::a});
-//        break;
-//      case 2:
-//        data_md = dnnl::memory::desc({shape, dtype, tag::ab});
-//        break;
-//      case 3:
-//        data_md = dnnl::memory::desc({shape, dtype, tag::abc});
-//        break;
-//      case 4:
-//        data_md = dnnl::memory::desc({shape, dtype, tag::abcd});
-//        break;
-//      case 5:
-//        data_md = dnnl::memory::desc({shape, dtype, tag::abcde});
-//        break;
-//      default:
-//        LOG(FATAL) << "Unsupported data shape dimension: " << shape.size();
-//        break;
-//    }
-//    return data_md;
-//  }
-//
-  BNNSFilterParameters execution_param;
 
-  std::vector<BNNS::Tensor> tensors_;
+  BNNS::Dtype convertToBNNS(const DLDataType &dl_dtype) {
+    if (dl_dtype.code == DLDataTypeCode::kDLFloat) {
+      if (dl_dtype.bits == 32) return BNNSDataTypeFloat32;
+      if (dl_dtype.bits == 16) return BNNSDataTypeFloat16;
+    }
+    if (dl_dtype.code == DLDataTypeCode::kDLInt) {
+      if (dl_dtype.bits == 32) return BNNSDataTypeInt32;
+      if (dl_dtype.bits == 16) return BNNSDataTypeInt16;
+      if (dl_dtype.bits == 8) return BNNSDataTypeInt8;
+    }
+    if (dl_dtype.code == DLDataTypeCode::kDLUInt) {
+      if (dl_dtype.bits == 32) return BNNSDataTypeUInt32;
+      if (dl_dtype.bits == 16) return BNNSDataTypeUInt16;
+      if (dl_dtype.bits == 8) return BNNSDataTypeUInt8;
+    }
+    LOG(FATAL) << "Unsupported data type for BNNS runtime";
+    return BNNS::Dtype(0);
+  }
+
+  BNNSFilterParameters common_filter_param;
+
   std::vector<BNNS::Primitive> primitives_;
   std::vector<std::pair<uint32_t, uint32_t>> prim_args_;
 
-//  /* The entry ID to its corresponding output memory. */
-  std::unordered_map<uint32_t, BNNS::Tensor> entry_out_mem_;
+  /* The entry ID to its corresponding output memory. */
+  std::unordered_map<uint32_t, std::shared_ptr<BNNS::Tensor>> entry_out_mem_;
 };
 
 runtime::Module BNNSJSONRuntimeCreate(String symbol_name, String graph_json,
