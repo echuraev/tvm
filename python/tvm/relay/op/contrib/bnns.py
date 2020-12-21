@@ -42,6 +42,9 @@ import tvm.ir
 from ...dataflow_pattern import wildcard, is_op
 from .register import register_pattern_table
 
+# Old style BNNS API are used for iOS < 14 and macOS < 11
+# TODO [xpeskov]: OS version should be extracted from target
+use_old_bnns_api = True
 
 def _register_external_op_helper(op_name, supported=True):
     """The helper function to indicate that a given operator can be supported
@@ -66,12 +69,38 @@ def _register_external_op_helper(op_name, supported=True):
 
 
 # _register_external_op_helper("nn.batch_norm")
-_register_external_op_helper("nn.conv2d")
+# _register_external_op_helper("nn.conv2d")
 # _register_external_op_helper("nn.dense")
 # _register_external_op_helper("nn.relu")
 # _register_external_op_helper("add")
 # _register_external_op_helper("subtract")
 # _register_external_op_helper("multiply")
+
+
+@tvm.ir.register_op_attr("nn.conv2d", "target.bnns")
+def conv2d(expr):
+    """Check if the conv2d can be executed in BNNS."""
+    if use_old_bnns_api:
+        attrs, args = expr.attrs, expr.args
+        if attrs.groups != 1:
+            return False
+        if attrs.dilation[0] != 1 or attrs.dilation[1] != 1:
+            return False
+        data_typ = args[0].checked_type
+        if len(data_typ.shape) != 4 or data_typ.dtype != "float32":
+            return False
+        kernel_typ = args[1].checked_type
+        if len(kernel_typ.shape) != 4 or kernel_typ.dtype != "float32":
+            return False
+        # Asymetric pad case is not supported
+        if attrs.padding[0] != attrs.padding[2] or attrs.padding[1] != attrs.padding[3]:
+            return False
+
+    if attrs.data_layout != "NCHW":
+        return False
+    if attrs.out_dtype != "float32" and attrs.out_dtype != "":  # TODO [apeskov]: filter by BNNS supported data types
+        return False
+    return True
 
 
 def make_pattern(with_bias=True):
