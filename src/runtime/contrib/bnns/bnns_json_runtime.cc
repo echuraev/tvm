@@ -139,7 +139,8 @@ namespace BNNS {
     }
 
     void execute(const Tensor &src1, Tensor &dst1) {
-      BNNSFilterApply(bnns_filter, src1.get_data_hdl(), dst1.get_data_hdl());
+      auto res = BNNSFilterApply(bnns_filter, src1.get_data_hdl(), dst1.get_data_hdl());
+      ICHECK_EQ(res, 0) << "BNNS runtime. Primitive was not executed properly";
     }
 
    private:
@@ -202,9 +203,9 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
         auto op_name = node.GetOpName();
         if ("nn.conv2d" == op_name) {
           Conv2d(nid);
-//        } else if ("dnnl.conv2d_relu" == op_name) {
+//        } else if ("bnns.conv2d_relu" == op_name) {
 //          Conv2d(nid, true, false);
-//        } else if ("dnnl.conv2d_bias_relu" == op_name) {
+//        } else if ("bnns.conv2d_bias_relu" == op_name) {
 //          Conv2d(nid, true, true);
 //        } else if ("nn.dense" == op_name) {
 //          Dense(nid);
@@ -259,10 +260,10 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
         OC = weight_shape[0],                   // output channels
         KH = weight_shape[2],                   // weight height
         KW = weight_shape[3],                   // weight width
-        PH_L = std::stoi(str_padding[1]),       // height padding: left
-        PH_R = std::stoi(str_padding[3]),       // height padding: right
-        PW_L = std::stoi(str_padding[0]),       // width padding: left
-        PW_R = std::stoi(str_padding[2]),       // width padding: right
+        PH_L = std::stoi(str_padding[0]),       // height padding: left
+        PH_R = std::stoi(str_padding[2]),       // height padding: right
+        PW_L = std::stoi(str_padding[1]),       // width padding: left
+        PW_R = std::stoi(str_padding[3]),       // width padding: right
         SH = std::stoi(str_strides[0]),         // height-wise stride
         SW = std::stoi(str_strides[0]),         // weight-wise stride
         OH = (IH - KH + PH_L + PH_R) / SH + 1,  // output height
@@ -280,11 +281,11 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
     BNNS::Shape padding_dims_l = {PH_L, PW_L};
     BNNS::Shape padding_dims_r = {PH_R, PW_R};
 
-//    auto weight_ext_data_hdl = data_entry_[EntryID(weight_entry)]->data;
+    auto weight_ext_data_hdl = data_entry_[EntryID(weight_entry)]->data;
 
     // Memory descriptions.
     auto src_md = BindBNNSTensor(src_entry);
-    auto weights_md = BindBNNSTensor(weight_entry);
+    auto weights_md = BindBNNSTensor(weight_entry, weight_ext_data_hdl);
     auto dst_md = BindBNNSTensor(dst_entry);
     // TODO [apeskov]: check correctness of tensor shapes
 
@@ -312,6 +313,8 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
 
     auto filter = BNNSFilterCreateConvolutionLayer(&src_md->get_desc(), &dst_md->get_desc(),
               &conv_param, &common_filter_param);
+    ICHECK(filter) << "BNNS primitive was not created. Unsupported attributes configuration";
+
     primitives_.emplace_back(filter);
     prim_args_.push_back({EntryID(src_entry), EntryID(dst_entry)});
   }
