@@ -49,7 +49,6 @@ def _get_model(
     var_names,
     has_bias=False,
     has_activation=False,
-    has_pad=False,
 ):
     """Return a model and any parameters it may have"""
     a = relay.var(next(var_names), shape=shape, dtype=dtype)
@@ -69,9 +68,9 @@ def _get_model(
     )
     params = {"w": w}
     if has_bias:
-        b = tvm.nd.array(np.random.uniform(-128, 127, weight_shape[3]).astype(dtype))
+        b = tvm.nd.array(np.random.uniform(-128, 127, weight_shape[0]).astype(dtype))
         biasc = relay.const(b, dtype)
-        out = relay.nn.bias_add(out, biasc, axis=3)
+        out = relay.nn.bias_add(out, biasc, axis=1)
         params["b"] = b
     if has_activation:
         out = relay.nn.relu(out)
@@ -94,13 +93,13 @@ def test_conv2d():
     dilation = [(1, 1)]
     out_channels = [4, 7, 16]
     input_shapes = [(10, 10, 14), (12, 15, 16), (20, 20, 20)]
-    # composite operator (pad, bias, activation)
+    # composite operator (bias, activation)
     composite = [
-        (False, False, False),
-        (False, True, False),
-        (False, False, True),
-        (False, True, True),
-        (True, False, False),
+        (False, False),
+        (True, False),
+        (False, True),
+        (True, True),
+        (False, False),
     ]
     dtype = "float32"
     trials = generate_trials(
@@ -126,9 +125,8 @@ def test_conv2d():
             dtype,
             out_channels,
             iter(inputs),
-            has_pad=composite[0],
-            has_bias=composite[1],
-            has_activation=composite[2],
+            has_bias=composite[0],
+            has_activation=composite[1],
         )
         for bnns in [False, True]:
             outputs.append(build_and_run(func, inputs, 1, params, device, build_module, enable_framework=bnns)[0])
