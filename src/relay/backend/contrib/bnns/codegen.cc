@@ -35,12 +35,8 @@
 
 #include "../../utils.h"
 
-#ifdef USE_JSON_RUNTIME
 #include "../../../../runtime/contrib/json/json_node.h"
 #include "../codegen_json/codegen_json.h"
-#else
-#include "../codegen_c/codegen_c.h"
-#endif
 
 namespace tvm {
 namespace relay {
@@ -63,19 +59,19 @@ class BNNSJSONSerializer : public backend::contrib::JSONSerializer {
       name = op_node->name;
     } else if (const auto* fn = cn->op.as<FunctionNode>()) {
       auto comp = fn->GetAttr<String>(attr::kComposite);
-      ICHECK(comp.defined()) << "DNNL JSON runtime only supports composite functions.";
+      ICHECK(comp.defined()) << "BNNS JSON runtime only supports composite functions.";
       name = comp.value();
 
-      if (name == "dnnl.conv2d_bias_relu") {
+      if (name == "bnns.conv2d_bias_relu") {
         call = GetRootCall(fn->body.as<CallNode>(), 2, {"nn.conv2d", "add", "nn.relu"});
-      } else if (name == "dnnl.conv2d_relu") {
+      } else if (name == "bnns.conv2d_relu") {
         call = GetRootCall(fn->body.as<CallNode>(), 1, {"nn.conv2d", "nn.relu"});
         ICHECK(call->op.as<OpNode>()) << "Not op node";
       } else {
-        LOG(FATAL) << "Unrecognized DNNL pattern: " << name;
+        LOG(FATAL) << "Unrecognized BNNS pattern: " << name;
       }
     } else {
-      LOG(FATAL) << "DNNL JSON runtime does not support calls to " << cn->op->GetTypeKey();
+      LOG(FATAL) << "BNNS JSON runtime does not support calls to " << cn->op->GetTypeKey();
     }
 
     std::vector<JSONGraphNodeEntry> inputs;

@@ -203,10 +203,10 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
         auto op_name = node.GetOpName();
         if ("nn.conv2d" == op_name) {
           Conv2d(nid);
-//        } else if ("bnns.conv2d_relu" == op_name) {
-//          Conv2d(nid, true, false);
-//        } else if ("bnns.conv2d_bias_relu" == op_name) {
-//          Conv2d(nid, true, true);
+        } else if ("bnns.conv2d_relu" == op_name) {
+          Conv2d(nid, true, false);
+        } else if ("bnns.conv2d_bias_relu" == op_name) {
+          Conv2d(nid, true, true);
 //        } else if ("nn.dense" == op_name) {
 //          Dense(nid);
 //        } else if ("nn.batch_norm" == op_name) {
@@ -289,26 +289,37 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
     auto dst_md = BindBNNSTensor(dst_entry);
     // TODO [apeskov]: check correctness of tensor shapes
 
-    BNNSLayerData no_layer_data {
-        nullptr,  /* data */
-        BNNSDataTypeFloat32, /* data_type */
-        1.,       /* data_scale */
-        0.,       /* data_bias */
-        nullptr   /* data_table */
-    };
+    BNNSLayerData bias_data = {};
+
+    if (has_bias) {
+      auto bias_entry = node.GetInputs()[2];
+      auto bias_ext_data_hdl = data_entry_[EntryID(bias_entry)]->data;
+      bias_data = BindBNNSTensor(bias_entry, weight_ext_data_hdl)->get_bnns_layer_data();
+    } else {
+      bias_data = {
+          nullptr,  /* data */
+          BNNSDataTypeFloat32, /* data_type */
+          1.,       /* data_scale */
+          0.,       /* data_bias */
+          nullptr   /* data_table */
+      };
+    }
+
+    BNNSActivation activation = { has_relu ?
+        BNNSActivationFunctionRectifiedLinear : BNNSActivationFunctionIdentity };
 
     BNNSConvolutionLayerParameters conv_param = {
         SW ,  /* x_stride */
         SH ,  /* y_stride */
-        PW_L, /* x_padding */  // TODO [apeskov]: Only symmetric pad case are supported
+        PW_L, /* x_padding */
         PH_L, /* y_padding */
         KW,   /* k_width */
         KH,   /* k_height */
         IC,   /* in_channels */
         OC,   /* out_channels */
         weights_md->get_bnns_layer_data(), /* weights */
-        no_layer_data,                    /* bias */
-        {BNNSActivationFunctionIdentity}, /* activation */
+        bias_data,  /* bias */
+        activation, /* activation */
     };
 
     auto filter = BNNSFilterCreateConvolutionLayer(&src_md->get_desc(), &dst_md->get_desc(),

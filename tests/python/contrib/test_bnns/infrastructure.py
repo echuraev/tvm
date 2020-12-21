@@ -18,25 +18,20 @@
 import sys
 sys.path.append('..')
 
-from itertools import zip_longest, combinations
-import json
-import os
-import warnings
-
-import numpy as np
-
 import tvm
 from tvm import relay
 from tvm import rpc
 from tvm.relay import transform
 from tvm.contrib import graph_runtime
 from tvm.relay.op.contrib import arm_compute_lib
+from tvm.relay.op.contrib.register import get_pattern_table
 from tvm.contrib import utils
 from tvm.autotvm.measure import request_remote
 
 from common.infrastructure import Device
 
-Device.target = "llvm -mattr=+neon"
+# Device.target = "llvm -mattr=+neon"
+Device.target = "llvm"
 
 def skip_runtime_test():
     """Skip test if it requires the runtime and it's not present."""
@@ -65,6 +60,7 @@ def build_module(mod, target, params=None, enable_bnns=True, tvm_ops=0, acl_part
                     transform.InferType(),
                     transform.FoldConstant(),
                     transform.FoldScaleAxis(),
+                    transform.MergeComposite(get_pattern_table('bnns')),
                     transform.AnnotateTarget('bnns'),
                     transform.MergeCompilerRegions(),
                     transform.PartitionGraph(),
