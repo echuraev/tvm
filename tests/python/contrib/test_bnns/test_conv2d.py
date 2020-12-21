@@ -53,23 +53,13 @@ def _get_model(
 ):
     """Return a model and any parameters it may have"""
     a = relay.var(next(var_names), shape=shape, dtype=dtype)
-    if has_pad:
-        p = ((0, 0), (padding[0], padding[0]), (padding[1], padding[1]), (0, 0))
-        a = relay.nn.pad(a, pad_width=p)
-        padding = (0, 0, 0, 0)
-    else:
-        if len(padding) == 2:
-            padding = (padding[0], padding[1], padding[0], padding[1])
-        shape = (shape[0], shape[1] + padding[0] * 2, shape[2] + padding[1] * 2, shape[3])
-    weight_shape = (kernel_h, kernel_w, shape[3] // groups, channels)
+    weight_shape = (channels, shape[1] // groups, kernel_h, kernel_w)
     w = tvm.nd.array(np.random.uniform(-128, 127, weight_shape).astype(dtype))
     weights = relay.const(w, dtype)
     out = relay.nn.conv2d(
         a,
         weights,
         kernel_size=(kernel_h, kernel_w),
-        data_layout="NHWC",
-        kernel_layout="HWIO",
         dilation=dilation,
         strides=strides,
         padding=padding,
@@ -86,6 +76,7 @@ def _get_model(
     if has_activation:
         out = relay.nn.relu(out)
     return out, params
+
 
 def test_conv2d():
     Device.load("test_config.json")
