@@ -35,7 +35,7 @@
 
 #include "Accelerate/Accelerate.h"
 
-#define USE_OLD_BNNS_API 1
+#define USE_OLD_BNNS_API 0
 
 template<typename T1, typename T2>
 bool one_of(T1 arg1, T2 arg2) {
@@ -91,22 +91,6 @@ namespace BNNS {
       };
 #else
       ICHECK(shape.size() < BNNS_MAX_TENSOR_DIMENSION);
-      /*
-       *    BNNSNDArrayFlags flags;
-            BNNSDataLayout layout;
-
-            size_t size[BNNS_MAX_TENSOR_DIMENSION];
-            size_t stride[BNNS_MAX_TENSOR_DIMENSION];
-
-            void * _Nullable data;
-            BNNSDataType data_type;
-
-            void * _Nullable table_data;
-            BNNSDataType table_data_type;
-
-            float data_scale;
-            float data_bias;
-       */
 
       BNNSNDArrayFlags default_nd_array_flag = BNNSNDArrayFlagBackpropSet;
       bnns_nd_desc = {
@@ -116,13 +100,13 @@ namespace BNNS {
         {},      // strides
         hdl,     // data handler
         dtype,   // data type
-        nullptr, // table of values (clustering case)
-        BNNSDataTypeFloat32,
+        nullptr, // table_data (clustering case)
+        BNNSDataTypeFloat32, // assume this field has no affect in case of nullptr in table_data
         1.f,
         0.f
       };
 
-      std::copy(shape.begin(), shape.end(), std::begin(bnns_nd_desc.size));
+      std::copy(shape.rbegin(), shape.rend(), std::begin(bnns_nd_desc.size));
 #endif
       if (hdl) {
         data_handler = hdl;
@@ -160,6 +144,22 @@ namespace BNNS {
     }
 
     const BNNSImageStackDescriptor& get_desc() const { return bnns_desc; };
+
+    const BNNSNDArrayDescriptor& get_nd_desc(size_t nd = 0) const {
+      auto original_nd = real_shape.size();
+      // Ask of original descriptor
+      if (original_nd == nd || nd == 0)
+        return bnns_nd_desc;
+
+      // As of desc with excluded batch
+      if (original_nd == nd + 1) {
+        auto res = bnns_nd_desc;
+        res.size[original_nd - 1] = 0;
+        res.layout = BNNSDataLayout3DLastMajor; // TODO [apeskov] : hardcoded value. FIXME
+        return res;
+      }
+      LOG(FATAL) << "Unknown case of BNNS tensor interpretation";
+    };
 
     BNNSLayerData get_bnns_layer_data() const {
       return {
@@ -299,6 +299,7 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
     BNNS::Shape input_shape {dl_input_shape.begin(), dl_input_shape.end()};
     BNNS::Shape weight_shape {dl_weight_shape.begin(), dl_weight_shape.end()};
     std::vector<std::string> str_strides = node.GetAttr<std::vector<std::string>>("strides");
+    std::vector<std::string> str_dilation = node.GetAttr<std::vector<std::string>>("dilation");
     std::vector<std::string> str_padding = node.GetAttr<std::vector<std::string>>("padding");
     BNNS::Dim groups = std::stoi(node.GetAttr<std::vector<std::string>>("groups")[0]);
 
@@ -314,7 +315,9 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
         PW_L = std::stoi(str_padding[1]),       // width padding: left
         PW_R = std::stoi(str_padding[3]),       // width padding: right
         SH = std::stoi(str_strides[0]),         // height-wise stride
-        SW = std::stoi(str_strides[0]),         // weight-wise stride
+        SW = std::stoi(str_strides[1]),         // weight-wise stride
+        DH = std::stoi(str_dilation[0]),        // height kernel dilation
+        DW = std::stoi(str_dilation[1]),        // width kernel dilation
         OH = (IH - KH + PH_L + PH_R) / SH + 1,  // output height
         OW = (IW - KW + PW_L + PW_R) / SW + 1;  // output width
 
@@ -335,28 +338,23 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
     // Memory descriptions.
     auto src_md = BindBNNSTensor(src_entry);
     auto weights_md = BindBNNSTensor(weight_entry, weight_ext_data_hdl);
+    std::shared_ptr<BNNS::Tensor> bias_md;
     auto dst_md = BindBNNSTensor(dst_entry);
     // TODO [apeskov]: check correctness of tensor shapes
-
-    BNNSLayerData bias_data = {};
 
     if (has_bias) {
       auto bias_entry = node.GetInputs()[2];
       auto bias_ext_data_hdl = data_entry_[EntryID(bias_entry)]->data;
-      bias_data = BindBNNSTensor(bias_entry, weight_ext_data_hdl)->get_bnns_layer_data();
+      bias_md = BindBNNSTensor(bias_entry, weight_ext_data_hdl);
     } else {
-      bias_data = {
-          nullptr,  /* data */
-          BNNSDataTypeFloat32, /* data_type */
-          1.,       /* data_scale */
-          0.,       /* data_bias */
-          nullptr   /* data_table */
-      };
+      bias_md = std::make_shared<BNNS::Tensor>(BNNS::Shape {OC}, BNNSDataTypeFloat32, nullptr);
     }
 
     BNNSActivation activation = { has_relu ?
-        BNNSActivationFunctionRectifiedLinear : BNNSActivationFunctionIdentity };
+        BNNSActivationFunctionRectifiedLinear :
+        BNNSActivationFunctionIdentity };
 
+#if USE_OLD_BNNS_API
     BNNSConvolutionLayerParameters conv_param = {
         SW ,  /* x_stride */
         SH ,  /* y_stride */
@@ -367,14 +365,43 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
         IC,   /* in_channels */
         OC,   /* out_channels */
         weights_md->get_bnns_layer_data(), /* weights */
-        bias_data,  /* bias */
+        bias_md->get_bnns_layer_data(),    /* bias */
         activation, /* activation */
     };
 
     auto filter = BNNSFilterCreateConvolutionLayer(&src_md->get_desc(), &dst_md->get_desc(),
               &conv_param, &common_filter_param);
-    ICHECK(filter) << "BNNS primitive was not created. Unsupported attributes configuration";
+#else
 
+    auto src_candidate = src_md->get_nd_desc(3);
+    auto weights_candidate = weights_md->get_nd_desc(4);
+    auto dst_candidate = dst_md->get_nd_desc(3);
+    auto bias_candidate = bias_md->get_nd_desc(1);
+    src_candidate.layout = BNNSDataLayoutImageCHW;
+    dst_candidate.layout = BNNSDataLayoutImageCHW;
+    weights_candidate.layout = BNNSDataLayoutConvolutionWeightsOIHW;
+    bias_candidate.layout = BNNSDataLayoutVector;
+
+    BNNSLayerParametersConvolution conv_param = {
+        src_candidate,
+        weights_candidate,
+        dst_candidate,
+        bias_candidate,
+        activation,
+        SW, /* x_stride */
+        SH, /* y_stride */
+        DW, /* x_dilation_stride */
+        DH, /* y_dilation_stride */
+        0,  /* x_padding */
+        0,  /* y_padding */
+        groups, /* groups */
+        {PW_L, PW_R, PH_L, PH_R} /* explicit pads */
+    };
+
+    auto filter = BNNSFilterCreateLayerConvolution(&conv_param, &common_filter_param);
+#endif
+
+    ICHECK(filter) << "BNNS primitive was not created. Unsupported attributes configuration";
     primitives_.emplace_back(filter);
     prim_args_.push_back({EntryID(src_entry), EntryID(dst_entry)});
   }
