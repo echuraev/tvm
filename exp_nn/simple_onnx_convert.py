@@ -9,8 +9,6 @@ from tvm.relay.op.contrib.arm_compute_lib import partition_for_arm_compute_lib
 
 from tvm.contrib import xcode
 
-import numpy as np
-
 import os
 import re
 import argparse
@@ -75,11 +73,6 @@ path_to_onnx_model = args.model
 model_name = os.path.basename(path_to_onnx_model)
 model_name = os.path.splitext(model_name)[0]
 
-onnx_model = onnx.load(path_to_onnx_model)
-input_name = get_input_name(onnx_model)
-
-mod, params = relay.frontend.from_onnx(onnx_model, {input_name: parse_shape(args.shape)})
-
 
 def mod_partitioning(mod):
     def annotate_with_target(_mod, target_name):
@@ -106,6 +99,11 @@ def mod_partitioning(mod):
         mod = partition_for_arm_compute_lib(mod)
     return mod
 
+
+onnx_model = onnx.load(path_to_onnx_model)
+input_name = get_input_name(onnx_model)
+
+mod, params = relay.frontend.from_onnx(onnx_model, {input_name: parse_shape(args.shape)}, freeze_params=True)
 
 mod = mod_partitioning(mod)
 lib = relay.build(mod, target=target, params=params)
