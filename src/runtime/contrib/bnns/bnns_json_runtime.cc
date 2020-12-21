@@ -28,11 +28,14 @@
 #include <cstddef>
 #include <string>
 #include <vector>
+#include <numeric>
 
 #include "../json/json_node.h"
 #include "../json/json_runtime.h"
 
 #include "Accelerate/Accelerate.h"
+
+#define USE_OLD_BNNS_API 1
 
 template<typename T1, typename T2>
 bool one_of(T1 arg1, T2 arg2) {
@@ -69,6 +72,7 @@ namespace BNNS {
   class Tensor {
    public:
     Tensor(Shape shape, Dtype dtype, void* hdl):real_shape(shape) {
+#if USE_OLD_BNNS_API
       ICHECK(one_of(shape.size(), 3, 4));
       const auto dim_shift = (shape.size() == 4) ? 1 : 0;
       const size_t N = dim_shift ? shape[0] : 1;
@@ -85,13 +89,50 @@ namespace BNNS {
           1.,    /* data_scale */
           0.     /* data_bias */
       };
+#else
+      ICHECK(shape.size() < BNNS_MAX_TENSOR_DIMENSION);
+      /*
+       *    BNNSNDArrayFlags flags;
+            BNNSDataLayout layout;
 
+            size_t size[BNNS_MAX_TENSOR_DIMENSION];
+            size_t stride[BNNS_MAX_TENSOR_DIMENSION];
+
+            void * _Nullable data;
+            BNNSDataType data_type;
+
+            void * _Nullable table_data;
+            BNNSDataType table_data_type;
+
+            float data_scale;
+            float data_bias;
+       */
+
+      BNNSNDArrayFlags default_nd_array_flag = BNNSNDArrayFlagBackpropSet;
+      bnns_nd_desc = {
+        default_nd_array_flag,
+        BNNSDataLayout4DLastMajor,       // TODO [apeskov]: should support all ND layouts
+        {},      // shape
+        {},      // strides
+        hdl,     // data handler
+        dtype,   // data type
+        nullptr, // table of values (clustering case)
+        BNNSDataTypeFloat32,
+        1.f,
+        0.f
+      };
+
+      std::copy(shape.begin(), shape.end(), std::begin(bnns_nd_desc.size));
+#endif
       if (hdl) {
         data_handler = hdl;
         is_external_data = true;
       } else {
         const size_t elem_size = (dtype & 0xFFFF) / 4;
-        data_handler = default_alloc(N * C * H * W * elem_size);
+        const size_t elem_count = std::accumulate(real_shape.begin(), real_shape.end(),
+            1, std::multiplies<int>());
+
+        data_handler = default_alloc(elem_count * elem_size);
         is_external_data = false;
       }
     }
@@ -108,6 +149,15 @@ namespace BNNS {
 
     void* get_data_hdl() { return data_handler; }
     const void* get_data_hdl() const { return data_handler; };
+    void set_data_hdl(void *hdl) {
+      if (data_handler && !is_external_data) {
+        default_free(data_handler);
+        data_handler = nullptr;
+      }
+
+      data_handler = hdl;
+      is_external_data = true;
+    }
 
     const BNNSImageStackDescriptor& get_desc() const { return bnns_desc; };
 
@@ -126,6 +176,7 @@ namespace BNNS {
     void* data_handler;
     bool is_external_data = false;
     BNNSImageStackDescriptor bnns_desc;
+    BNNSNDArrayDescriptor bnns_nd_desc;
   };
 
   class Primitive {
@@ -166,29 +217,27 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
   }
 
   void Run() override {
-    // Fill in the input buffers.
-    for (size_t i = 0; i < input_nodes_.size(); ++i) {
-      auto eid = EntryID(input_nodes_[i], 0);
-      const DLTensor &dlt = *data_entry_[eid];
+    // Wrap external handler into BNNS tensor representation
+    auto bind_ext_hdl_to_tensor = [this] (uint32_t eid) {
+      std::cout << "Blabla !!!!" << std::endl;
+      const auto &ext_dlt = *data_entry_[eid];
+      auto &bnns_tensor = *entry_out_mem_[eid];
+      bnns_tensor.set_data_hdl(ext_dlt.data);
+    };
 
-      size_t buffer_size = GetDataSize(dlt);
-      write_to_bnns_memory(dlt.data, buffer_size, *entry_out_mem_[eid]);
+    // Bind all input/output external data object into internal abstractions
+    for (const auto &eid : input_var_eid_) {
+      bind_ext_hdl_to_tensor(eid);
+    }
+    for (const auto &out_entity : outputs_) {
+      bind_ext_hdl_to_tensor(EntryID(out_entity));
     }
 
-    // Invoke the engine through intepreting the stream.
+    // Invoke primitives in topological order
     for (int i = 0; i < primitives_.size(); ++i) {
       auto src = entry_out_mem_.at(prim_args_.at(i).first);
       auto dst = entry_out_mem_.at(prim_args_.at(i).second);
       primitives_.at(i).execute(*src, *dst);
-    }
-
-    // Read output buffers.
-    for (size_t i = 0; i < outputs_.size(); ++i) {
-      auto eid = EntryID(outputs_[i]);
-      const DLTensor &dlt = *data_entry_[eid];
-
-      size_t buffer_size = GetDataSize(dlt);
-      read_from_dnnl_memory(dlt.data, buffer_size, *entry_out_mem_[eid]);
     }
   }
 
