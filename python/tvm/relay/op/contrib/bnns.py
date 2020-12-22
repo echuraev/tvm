@@ -77,11 +77,16 @@ def _register_external_op_helper(op_name, supported=True):
 # _register_external_op_helper("multiply")
 
 
+# TODO [apeskov]: enlarge list of supported types
+#                 plus clarify meaning of "" value
+def dtype_is_supported(dtype):
+    return dtype == "float32" or dtype == ""
+
 @tvm.ir.register_op_attr("nn.conv2d", "target.bnns")
 def conv2d(expr):
     """Check if the conv2d can be executed in BNNS."""
+    attrs, args = expr.attrs, expr.args
     if use_old_bnns_api:
-        attrs, args = expr.attrs, expr.args
         if attrs.groups != 1:
             return False
         if attrs.dilation[0] != 1 or attrs.dilation[1] != 1:
@@ -98,7 +103,7 @@ def conv2d(expr):
 
     if attrs.data_layout != "NCHW":
         return False
-    if attrs.out_dtype != "float32" and attrs.out_dtype != "":  # TODO [apeskov]: filter by BNNS supported data types
+    if not dtype_is_supported(attrs.out_dtype):
         return False
     return True
 
@@ -115,9 +120,17 @@ def make_conv_relu_pattern(with_bias=True):
     return is_op("nn.relu")(conv_out)
 
 
+def check_conv(extract):
+    """Check conv pattern is supported by BNNS."""
+    call = extract
+    while call.op.name != "nn.conv2d":
+        call = call.args[0]
+    return conv2d(call)
+
+
 @register_pattern_table("bnns")
 def pattern_table():
-    conv2d_bias_relu_pat = ("bnns.conv2d_bias_relu", make_conv_relu_pattern(with_bias=True))
-    conv2d_relu_pat = ("bnns.conv2d_relu", make_conv_relu_pattern(with_bias=False))
+    conv2d_bias_relu_pat = ("bnns.conv2d_bias_relu", make_conv_relu_pattern(with_bias=True), check_conv)
+    conv2d_relu_pat = ("bnns.conv2d_relu", make_conv_relu_pattern(with_bias=False), check_conv)
     bnns_patterns = [conv2d_bias_relu_pat, conv2d_relu_pat]
     return bnns_patterns

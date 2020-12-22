@@ -143,6 +143,15 @@ namespace BNNS {
       is_external_data = true;
     }
 
+    size_t get_mb() const {
+      return real_shape[0];
+    }
+
+    size_t get_mb_stride() const {
+      return std::accumulate(real_shape.begin() + 1, real_shape.end(),
+          1, std::multiplies<int>());
+    }
+
     const BNNSImageStackDescriptor& get_desc() const { return bnns_desc; };
 
     const BNNSNDArrayDescriptor& get_nd_desc(size_t nd = 0) const {
@@ -190,7 +199,16 @@ namespace BNNS {
     }
 
     void execute(const Tensor &src1, Tensor &dst1) {
-      auto res = BNNSFilterApply(bnns_filter, src1.get_data_hdl(), dst1.get_data_hdl());
+      auto mb = src1.get_mb();
+      ICHECK_EQ(mb, dst1.get_mb());
+
+      // NB! Do not use simple BNNSFilterApply. There is a bug inside BNNS,
+      //     and BNNSFilterApply doesn't work for grouped convolution.
+      auto res = BNNSFilterApplyBatch(bnns_filter, mb,
+          src1.get_data_hdl(), src1.get_mb_stride(),
+          dst1.get_data_hdl(), dst1.get_mb_stride());
+
+//      auto res = BNNSFilterApply(bnns_filter, src1.get_data_hdl(), dst1.get_data_hdl());
       ICHECK_EQ(res, 0) << "BNNS runtime. Primitive was not executed properly";
     }
 
@@ -219,7 +237,6 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
   void Run() override {
     // Wrap external handler into BNNS tensor representation
     auto bind_ext_hdl_to_tensor = [this] (uint32_t eid) {
-      std::cout << "Blabla !!!!" << std::endl;
       const auto &ext_dlt = *data_entry_[eid];
       auto &bnns_tensor = *entry_out_mem_[eid];
       bnns_tensor.set_data_hdl(ext_dlt.data);
@@ -237,7 +254,7 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
     for (int i = 0; i < primitives_.size(); ++i) {
       auto src = entry_out_mem_.at(prim_args_.at(i).first);
       auto dst = entry_out_mem_.at(prim_args_.at(i).second);
-      primitives_.at(i).execute(*src, *dst);
+      primitives_.at(i)->execute(*src, *dst);
     }
   }
 
@@ -374,13 +391,21 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
 #else
 
     auto src_candidate = src_md->get_nd_desc(3);
-    auto weights_candidate = weights_md->get_nd_desc(4);
+    auto weights_candidate = weights_md->get_nd_desc();
     auto dst_candidate = dst_md->get_nd_desc(3);
-    auto bias_candidate = bias_md->get_nd_desc(1);
+    auto bias_candidate = bias_md->get_nd_desc();
     src_candidate.layout = BNNSDataLayoutImageCHW;
     dst_candidate.layout = BNNSDataLayoutImageCHW;
     weights_candidate.layout = BNNSDataLayoutConvolutionWeightsOIHW;
     bias_candidate.layout = BNNSDataLayoutVector;
+
+    // TODO [apeskov]: Tmp WA, broadcast bias is here with tailing [1, 1]
+    if (bias_candidate.size[0] == 1 && bias_candidate.size[1] == 1 &&
+        std::all_of(bias_candidate.size + 3, bias_candidate.size + BNNS_MAX_TENSOR_DIMENSION,
+            [] ( size_t d) { return d == 0; })) {
+      bias_candidate.size[0] = bias_candidate.size[2];
+      bias_candidate.size[1] = bias_candidate.size[2] = 0;
+    }
 
     BNNSLayerParametersConvolution conv_param = {
         src_candidate,
@@ -402,7 +427,7 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
 #endif
 
     ICHECK(filter) << "BNNS primitive was not created. Unsupported attributes configuration";
-    primitives_.emplace_back(filter);
+    primitives_.emplace_back(std::make_shared<BNNS::Primitive>(filter));
     prim_args_.push_back({EntryID(src_entry), EntryID(dst_entry)});
   }
 
@@ -440,7 +465,7 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
 
   BNNSFilterParameters common_filter_param;
 
-  std::vector<BNNS::Primitive> primitives_;
+  std::vector<std::shared_ptr<BNNS::Primitive>> primitives_;
   std::vector<std::pair<uint32_t, uint32_t>> prim_args_;
 
   /* The entry ID to its corresponding output memory. */

@@ -91,8 +91,9 @@ def test_conv2d():
     pad = [(1, 1), (2, 2), (2, 1)]
     strides = [(1, 1), (2, 2)]
     dilation = [(1, 1)]
-    out_channels = [4, 7, 16]
+    out_channels = [4, 8, 16]
     input_shapes = [(10, 10, 14), (12, 15, 16), (20, 20, 20)]
+    groups = [1, 2]
     # composite operator (bias, activation)
     composite = [
         (False, False),
@@ -103,11 +104,10 @@ def test_conv2d():
     ]
     dtype = "float32"
     trials = generate_trials(
-        [kernel_hs, kernel_ws, pad, strides, dilation, out_channels, input_shapes, composite], 3
+        [kernel_hs, kernel_ws, pad, strides, dilation, out_channels, input_shapes, groups, composite], 3
     )
 
-    for kernel_h, kernel_w, pad, stride, dilation, out_channels, input_shapes, composite in trials:
-        groups = 1
+    for kernel_h, kernel_w, pad, stride, dilation, out_channels, input_shapes, group, composite in trials:
         shape = (1, *input_shapes)
         outputs = []
         inputs = {
@@ -121,7 +121,7 @@ def test_conv2d():
             pad,
             stride,
             dilation,
-            groups,
+            group,
             dtype,
             out_channels,
             iter(inputs),
@@ -133,7 +133,7 @@ def test_conv2d():
 
         config = {
             "shape": shape,
-            "groups": groups,
+            "group": group,
             "kernel size": (kernel_h, kernel_w),
             "padding": pad,
             "stride": stride,
