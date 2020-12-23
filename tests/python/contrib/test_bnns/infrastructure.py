@@ -30,7 +30,6 @@ from tvm.autotvm.measure import request_remote
 
 from common.infrastructure import Device
 
-# Device.target = "llvm -mattr=+neon"
 Device.target = "llvm"
 
 def skip_runtime_test():

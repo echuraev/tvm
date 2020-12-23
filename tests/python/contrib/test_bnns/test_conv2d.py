@@ -142,3 +142,7 @@ def test_conv2d():
             "composite operators (pad, bias, activation)": composite,
         }
         verify(outputs, atol=0.002, rtol=0.01, config=config)
+
+
+if __name__ == "__main__":
+    test_conv2d()

@@ -72,6 +72,22 @@ namespace BNNS {
   class Tensor {
    public:
     Tensor(Shape shape, Dtype dtype, void* hdl):real_shape(shape) {
+      if (hdl) {
+        data_handler = hdl;
+        is_external_data = true;
+      } else {
+        const size_t elem_size = (dtype & 0xFFFF) / 4;
+        const size_t elem_count = std::accumulate(real_shape.begin(), real_shape.end(),
+            1, std::multiplies<int>());
+
+        data_handler = default_alloc(elem_count * elem_size);
+        is_external_data = false;
+      }
+
+      if (one_of(shape.size(), 1, 2)) {
+          initVector(shape, dtype, hdl);
+          return;
+      }
 #if USE_OLD_BNNS_API
       ICHECK(one_of(shape.size(), 3, 4));
       const auto dim_shift = (shape.size() == 4) ? 1 : 0;
@@ -108,17 +124,6 @@ namespace BNNS {
 
       std::copy(shape.rbegin(), shape.rend(), std::begin(bnns_nd_desc.size));
 #endif
-      if (hdl) {
-        data_handler = hdl;
-        is_external_data = true;
-      } else {
-        const size_t elem_size = (dtype & 0xFFFF) / 4;
-        const size_t elem_count = std::accumulate(real_shape.begin(), real_shape.end(),
-            1, std::multiplies<int>());
-
-        data_handler = default_alloc(elem_count * elem_size);
-        is_external_data = false;
-      }
     }
 
     ~Tensor() {
@@ -126,6 +131,23 @@ namespace BNNS {
         default_free(data_handler);
         data_handler = nullptr;
       }
+    }
+
+    void initVector(Shape shape, Dtype dtype, void* hdl) {
+      auto flags = BNNSNDArrayFlags(0);
+      bnns_nd_desc = {
+          flags,    /* flags */
+          BNNSDataLayoutVector,   /* layout */
+          {},    /* shape */
+          {},       /* stride */
+          nullptr,  /* data */
+          BNNSDataTypeFloat32, /* data_type */
+          nullptr,  /* table data */
+          BNNSDataTypeFloat32, /* table data_type */
+          0,        /* scale */
+          0         /* bias */
+      };
+      std::copy(shape.rbegin(), shape.rend(), std::begin(bnns_nd_desc.size));
     }
 
     Dtype get_data_type() const { return bnns_desc.data_type; }
@@ -273,8 +295,8 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
           Conv2d(nid, true, false);
         } else if ("bnns.conv2d_bias_relu" == op_name) {
           Conv2d(nid, true, true);
-//        } else if ("nn.dense" == op_name) {
-//          Dense(nid);
+        } else if ("nn.dense" == op_name) {
+          Dense(nid);
 //        } else if ("nn.batch_norm" == op_name) {
 //          BatchNorm(nid);
 //        } else if ("nn.relu" == op_name) {
@@ -426,6 +448,44 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
     auto filter = BNNSFilterCreateLayerConvolution(&conv_param, &common_filter_param);
 #endif
 
+    ICHECK(filter) << "BNNS primitive was not created. Unsupported attributes configuration";
+    primitives_.emplace_back(std::make_shared<BNNS::Primitive>(filter));
+    prim_args_.push_back({EntryID(src_entry), EntryID(dst_entry)});
+  }
+
+  void Dense(const size_t& nid) {
+    auto node = nodes_[nid];
+
+    // Setup attributes.
+    auto src_entry = node.GetInputs()[0];
+    auto weight_entry = node.GetInputs()[1];
+    auto dst_entry = JSONGraphNodeEntry(nid, 0);
+
+    auto w_data = data_entry_[EntryID(weight_entry)]->data;
+    // Memory descriptions.
+    auto src_md = BindBNNSTensor(src_entry);
+    auto weights_md = BindBNNSTensor(weight_entry, w_data);
+    auto dst_md = BindBNNSTensor(dst_entry);
+
+    BNNSNDArrayDescriptor in_desc = src_md->get_nd_desc(1);
+    BNNSNDArrayDescriptor w_desc = weights_md->get_nd_desc(2);
+    BNNSNDArrayDescriptor out_desc = dst_md->get_nd_desc(1);
+    w_desc.layout = BNNSDataLayoutRowMajorMatrix;
+    in_desc.layout = BNNSDataLayoutVector;
+    out_desc.layout = BNNSDataLayoutVector;
+    w_desc.data = w_data;
+    std::cout << "out_desc.size: " << out_desc.size[0] << ", " << out_desc.size[1] << ", " << out_desc.size[2] << std::endl;
+    BNNSNDArrayDescriptor bias = {};
+
+    BNNSLayerParametersFullyConnected layerParameters = {
+        in_desc,
+        w_desc,
+        out_desc,
+        bias,
+        {BNNSActivationFunctionIdentity}, /* activation */
+    };
+
+    auto filter = BNNSFilterCreateLayerFullyConnected(&layerParameters, &common_filter_param);
     ICHECK(filter) << "BNNS primitive was not created. Unsupported attributes configuration";
     primitives_.emplace_back(std::make_shared<BNNS::Primitive>(filter));
     prim_args_.push_back({EntryID(src_entry), EntryID(dst_entry)});

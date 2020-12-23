@@ -271,4 +271,4 @@ set(USE_HEXAGON_SDK /path/to/sdk)
 set(USE_TARGET_ONNX OFF)
 
 # Whether enable BNNS runtime
-set(USE_BNNS ON)
+set(USE_BNNS OFF)
