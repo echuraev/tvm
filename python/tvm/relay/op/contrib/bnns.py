@@ -44,7 +44,7 @@ from .register import register_pattern_table
 
 # Old style BNNS API are used for iOS < 14 and macOS < 11
 # TODO [xpeskov]: OS version should be extracted from target
-use_old_bnns_api = True
+use_old_bnns_api = False
 
 def _register_external_op_helper(op_name, supported=True):
     """The helper function to indicate that a given operator can be supported
@@ -67,18 +67,10 @@ def _register_external_op_helper(op_name, supported=True):
 
     return _func_wrapper
 
-
-# _register_external_op_helper("nn.batch_norm")
-# _register_external_op_helper("nn.conv2d")
 _register_external_op_helper("nn.dense")
-# _register_external_op_helper("nn.relu")
-# _register_external_op_helper("add")
-# _register_external_op_helper("subtract")
-# _register_external_op_helper("multiply")
-
 
 # TODO [apeskov]: enlarge list of supported types
-#                 plus clarify meaning of "" value
+#   plus clarify meaning of "" value
 def dtype_is_supported(dtype):
     return dtype == "float32" or dtype == ""
 
@@ -108,16 +100,16 @@ def conv2d(expr):
     return True
 
 
-def make_conv_relu_pattern(with_bias=True):
+def make_conv_relu_pattern(with_bias=True, with_relu=True):
     data = wildcard()
     weight = wildcard()
     bias = wildcard()
-    conv = is_op("nn.conv2d")(data, weight)
+    pat = is_op("nn.conv2d")(data, weight)
     if with_bias:
-        conv_out = is_op("add")(conv, bias)
-    else:
-        conv_out = conv
-    return is_op("nn.relu")(conv_out)
+        pat = is_op("add")(pat, bias) | is_op("nn.bias_add")(pat, bias)
+    if with_relu:
+        pat = is_op("nn.relu")(pat)
+    return pat
 
 
 def check_conv(extract):
@@ -130,7 +122,8 @@ def check_conv(extract):
 
 @register_pattern_table("bnns")
 def pattern_table():
-    conv2d_bias_relu_pat = ("bnns.conv2d_bias_relu", make_conv_relu_pattern(with_bias=True), check_conv)
-    conv2d_relu_pat = ("bnns.conv2d_relu", make_conv_relu_pattern(with_bias=False), check_conv)
-    bnns_patterns = [conv2d_bias_relu_pat, conv2d_relu_pat]
+    conv2d_bias_pat = ("bnns.conv2d_bias", make_conv_relu_pattern(with_bias=True, with_relu=False), check_conv)
+    conv2d_bias_relu_pat = ("bnns.conv2d_bias_relu", make_conv_relu_pattern(with_bias=True, with_relu=True), check_conv)
+    conv2d_relu_pat = ("bnns.conv2d_relu", make_conv_relu_pattern(with_bias=False, with_relu=True), check_conv)
+    bnns_patterns = [conv2d_bias_relu_pat, conv2d_relu_pat, conv2d_bias_pat]
     return bnns_patterns

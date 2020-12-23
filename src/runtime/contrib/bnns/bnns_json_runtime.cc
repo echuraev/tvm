@@ -230,7 +230,6 @@ namespace BNNS {
           src1.get_data_hdl(), src1.get_mb_stride(),
           dst1.get_data_hdl(), dst1.get_mb_stride());
 
-//      auto res = BNNSFilterApply(bnns_filter, src1.get_data_hdl(), dst1.get_data_hdl());
       ICHECK_EQ(res, 0) << "BNNS runtime. Primitive was not executed properly";
     }
 
@@ -295,6 +294,8 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
           Conv2d(nid, true, false);
         } else if ("bnns.conv2d_bias_relu" == op_name) {
           Conv2d(nid, true, true);
+        } else if ("bnns.conv2d_bias" == op_name) {
+          Conv2d(nid, false, true);
         } else if ("nn.dense" == op_name) {
           Dense(nid);
 //        } else if ("nn.batch_norm" == op_name) {
@@ -384,7 +385,7 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
     if (has_bias) {
       auto bias_entry = node.GetInputs()[2];
       auto bias_ext_data_hdl = data_entry_[EntryID(bias_entry)]->data;
-      bias_md = BindBNNSTensor(bias_entry, weight_ext_data_hdl);
+      bias_md = BindBNNSTensor(bias_entry, bias_ext_data_hdl);
     } else {
       bias_md = std::make_shared<BNNS::Tensor>(BNNS::Shape {OC}, BNNSDataTypeFloat32, nullptr);
     }

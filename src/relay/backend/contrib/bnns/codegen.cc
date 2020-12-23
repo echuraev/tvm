@@ -62,10 +62,15 @@ class BNNSJSONSerializer : public backend::contrib::JSONSerializer {
       ICHECK(comp.defined()) << "BNNS JSON runtime only supports composite functions.";
       name = comp.value();
 
+      auto body = fn->body.as<CallNode>();
       if (name == "bnns.conv2d_bias_relu") {
-        call = GetRootCall(fn->body.as<CallNode>(), 2, {"nn.conv2d", "add", "nn.relu"});
+        auto add_op_type = IsOp(body->args[0].as<CallNode>(), "add") ? "add" : "nn.bias_add";
+        call = GetRootCall(body, 2, {"nn.conv2d", add_op_type, "nn.relu"});
+      } else if (name == "bnns.conv2d_bias") {
+        auto add_op_type = IsOp(body, "add") ? "add" : "nn.bias_add";
+        call = GetRootCall(body, 1, {"nn.conv2d", add_op_type});
       } else if (name == "bnns.conv2d_relu") {
-        call = GetRootCall(fn->body.as<CallNode>(), 1, {"nn.conv2d", "nn.relu"});
+        call = GetRootCall(body, 1, {"nn.conv2d", "nn.relu"});
         ICHECK(call->op.as<OpNode>()) << "Not op node";
       } else {
         LOG(FATAL) << "Unrecognized BNNS pattern: " << name;

@@ -47,8 +47,8 @@ def _get_model(
     dtype,
     channels,
     var_names,
-    has_bias=False,
-    has_activation=False,
+    bias_type='none',
+    activation_type='none',
 ):
     """Return a model and any parameters it may have"""
     a = relay.var(next(var_names), shape=shape, dtype=dtype)
@@ -67,12 +67,18 @@ def _get_model(
         out_dtype=dtype,
     )
     params = {"w": w}
-    if has_bias:
+    if bias_type == "bias_add":
         b = tvm.nd.array(np.random.uniform(-128, 127, weight_shape[0]).astype(dtype))
         biasc = relay.const(b, dtype)
         out = relay.nn.bias_add(out, biasc, axis=1)
         params["b"] = b
-    if has_activation:
+    elif bias_type == "add":
+        b = tvm.nd.array(np.random.uniform(-128, 127, (weight_shape[0], 1, 1)).astype(dtype))
+        biasc = relay.const(b, dtype)
+        out = relay.add(out, biasc)
+        params["b"] = b
+
+    if activation_type == "relu":
         out = relay.nn.relu(out)
     return out, params
 
@@ -93,22 +99,18 @@ def test_conv2d():
     dilation = [(1, 1)]
     out_channels = [4, 8, 16]
     input_shapes = [(10, 10, 14), (12, 15, 16), (20, 20, 20)]
+    batches = [1, 2]
     groups = [1, 2]
-    # composite operator (bias, activation)
-    composite = [
-        (False, False),
-        (True, False),
-        (False, True),
-        (True, True),
-        (False, False),
-    ]
+    bias_kind = ['none', 'add', 'bias.add']
+    activation_kind = ['none', 'relu']
     dtype = "float32"
     trials = generate_trials(
-        [kernel_hs, kernel_ws, pad, strides, dilation, out_channels, input_shapes, groups, composite], 3
+        [kernel_hs, kernel_ws, pad, strides, dilation, out_channels, input_shapes,
+         groups, batches, bias_kind, activation_kind], 3
     )
 
-    for kernel_h, kernel_w, pad, stride, dilation, out_channels, input_shapes, group, composite in trials:
-        shape = (1, *input_shapes)
+    for kernel_h, kernel_w, pad, stride, dilation, out_channels, input_shapes, group, batch, bias, activation in trials:
+        shape = (batch, *input_shapes)
         outputs = []
         inputs = {
             "a": tvm.nd.array(np.random.uniform(-128, 127, shape).astype(dtype)),
@@ -125,8 +127,8 @@ def test_conv2d():
             dtype,
             out_channels,
             iter(inputs),
-            has_bias=composite[0],
-            has_activation=composite[1],
+            bias_type=bias,
+            activation_type=activation,
         )
         for bnns in [False, True]:
             outputs.append(build_and_run(func, inputs, 1, params, device, build_module, enable_framework=bnns)[0])
@@ -139,7 +141,8 @@ def test_conv2d():
             "stride": stride,
             "dilation": dilation,
             "out channels": out_channels,
-            "composite operators (pad, bias, activation)": composite,
+            "bias": bias,
+            "activation": activation
         }
         verify(outputs, atol=0.002, rtol=0.01, config=config)
 
