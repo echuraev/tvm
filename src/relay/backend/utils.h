@@ -255,6 +255,7 @@ inline bool IsOp(const CallNode* call, const std::string& op_name) {
   const auto* op_node = call->op.as<OpNode>();
   ICHECK(op_node) << "Expects a single op.";
   Op op = GetRef<Op>(op_node);
+  std::cout << "IsOp name node: " << op_node->name.c_str() << ", op_name: " << op_name << ", op: " << op->name.c_str() << std::endl;
   return op == Op::Get(op_name);
 }
 

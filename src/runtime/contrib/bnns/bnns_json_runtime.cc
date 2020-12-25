@@ -298,6 +298,10 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
           Conv2d(nid, false, true);
         } else if ("nn.dense" == op_name) {
           Dense(nid);
+        } else if ("bnns.dense_bias" == op_name) {
+          Dense(nid, true);
+        } else if ("bnns.dense_bias_gelu" == op_name) {
+          Dense(nid, true, true);
 //        } else if ("nn.batch_norm" == op_name) {
 //          BatchNorm(nid);
 //        } else if ("nn.relu" == op_name) {
@@ -454,7 +458,7 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
     prim_args_.push_back({EntryID(src_entry), EntryID(dst_entry)});
   }
 
-  void Dense(const size_t& nid) {
+  void Dense(const size_t& nid, const bool has_bias = false, const bool has_gelu = false) {
     auto node = nodes_[nid];
 
     // Setup attributes.
@@ -475,15 +479,26 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
     in_desc.layout = BNNSDataLayoutVector;
     out_desc.layout = BNNSDataLayoutVector;
     w_desc.data = w_data;
-    std::cout << "out_desc.size: " << out_desc.size[0] << ", " << out_desc.size[1] << ", " << out_desc.size[2] << std::endl;
     BNNSNDArrayDescriptor bias = {};
+    if (has_bias) {
+      auto bias_entry = node.GetInputs()[2];
+      auto bias_data = data_entry_[EntryID(bias_entry)]->data;
+      auto bias_md = BindBNNSTensor(bias_entry, bias_data);
+      bias = bias_md->get_nd_desc();
+      bias.layout = BNNSDataLayoutVector;
+      bias.data = bias_data;
+    }
+    BNNSActivation activation = {BNNSActivationFunctionIdentity};
+    if (has_gelu) {
+        activation = {BNNSActivationFunctionGELUApproximation};
+    }
 
     BNNSLayerParametersFullyConnected layerParameters = {
         in_desc,
         w_desc,
         out_desc,
         bias,
-        {BNNSActivationFunctionIdentity}, /* activation */
+        activation,
     };
 
     auto filter = BNNSFilterCreateLayerFullyConnected(&layerParameters, &common_filter_param);

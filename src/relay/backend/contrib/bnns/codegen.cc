@@ -72,6 +72,10 @@ class BNNSJSONSerializer : public backend::contrib::JSONSerializer {
       } else if (name == "bnns.conv2d_relu") {
         call = GetRootCall(body, 1, {"nn.conv2d", "nn.relu"});
         ICHECK(call->op.as<OpNode>()) << "Not op node";
+      } else if (name == "bnns.dense_bias") {
+        call = GetRootCall(fn->body.as<CallNode>(), 1, {"nn.dense", "add"});
+      } else if (name == "bnns.dense_bias_gelu") {
+        call = fn->body.as<CallNode>();
       } else {
         LOG(FATAL) << "Unrecognized BNNS pattern: " << name;
       }

@@ -38,13 +38,54 @@ to handle tensor processing. Particularly:
 # - The other way is to implement the function by themselves to
 # check the attributes of the op and decide if it should be offloaded to DNNL.
 """
+import math
 import tvm.ir
-from ...dataflow_pattern import wildcard, is_op
-from .register import register_pattern_table
+from ...dataflow_pattern import wildcard, is_op, is_expr
+from .register import register_pattern_table, get_pattern_table
+
+from tvm.relay import transform
+from tvm.relay.expr import const
+from tvm.relay.build_module import bind_params_by_name
 
 # Old style BNNS API are used for iOS < 14 and macOS < 11
 # TODO [xpeskov]: OS version should be extracted from target
 use_old_bnns_api = False
+
+
+def partition_for_bnns(mod, params=None):
+    """Partition the graph greedily offloading supported
+    operators to BNNS.
+
+    Parameters
+    ----------
+    mod : Module
+        The module to run passes on.
+    params : Optional[Dict[str, NDArray]]
+        Constant input parameters.
+
+    Returns
+    -------
+    ret : annotated and partitioned module.
+    """
+    if params:
+        mod["main"] = bind_params_by_name(mod["main"], params)
+
+    seq = tvm.transform.Sequential(
+        [
+            transform.InferType(),
+            transform.FoldConstant(),
+            transform.FoldScaleAxis(),
+            transform.DynamicToStatic(),
+            transform.AlterOpLayout(),
+            transform.MergeComposite(get_pattern_table("bnns")),
+            transform.AnnotateTarget("bnns"),
+            transform.MergeCompilerRegions(),
+            transform.PartitionGraph(),
+        ]
+    )
+
+    return seq(mod)
+
 
 def _register_external_op_helper(op_name, supported=True):
     """The helper function to indicate that a given operator can be supported
@@ -67,7 +108,6 @@ def _register_external_op_helper(op_name, supported=True):
 
     return _func_wrapper
 
-_register_external_op_helper("nn.dense")
 
 # TODO [apeskov]: enlarge list of supported types
 #   plus clarify meaning of "" value
@@ -100,6 +140,21 @@ def conv2d(expr):
     return True
 
 
+@tvm.ir.register_op_attr("nn.dense", "target.bnns")
+def dense(expr):
+    """Check if the dense can be used in BNNS."""
+    attrs, args = expr.attrs, expr.args
+    data_typ = args[0].checked_type
+    if data_typ.dtype != "float32":
+        return False
+    kernel_typ = args[1].checked_type
+    if len(kernel_typ.shape) != 2 or kernel_typ.dtype != "float32":
+        return False
+    if attrs.out_dtype != "float32" and attrs.out_dtype != "":
+        return False
+    return True
+
+
 def make_conv_relu_pattern(with_bias=True, with_relu=True):
     data = wildcard()
     weight = wildcard()
@@ -120,10 +175,50 @@ def check_conv(extract):
     return conv2d(call)
 
 
+def make_dense_bias_pattern():
+    data = wildcard()
+    weight = wildcard()
+    bias = wildcard()
+    d = is_op("nn.dense")(data, weight)
+    return is_op("add")(d, bias)
+
+
+def make_dense_bias_gelu_pattern():
+    dense_bias = make_dense_bias_pattern()
+    const1 = is_expr(const(0.044715))
+    const2 = is_expr(const(math.sqrt(2 / math.pi)))
+
+    gelu = is_op("power")(dense_bias, is_expr(const(3, dtype="float32")))
+    gelu = is_op("multiply")(gelu, const1)
+    gelu = is_op("add")(gelu, dense_bias)
+    gelu = is_op("multiply")(gelu, const2)
+    gelu = is_op("tanh")(gelu)
+    gelu = is_op("add")(gelu, is_expr(const(1, dtype="float32")))
+    gelu = is_op("multiply")(gelu, is_expr(const(0.5)))
+    gelu = is_op("multiply")(gelu, dense_bias)
+    return gelu
+
+
+def check_dense(extract):
+    """Check conv pattern is supported by ACL."""
+    call = extract
+    while call.op.name != "nn.dense":
+        call = call.args[0]
+    return dense(call)
+
+
 @register_pattern_table("bnns")
 def pattern_table():
     conv2d_bias_pat = ("bnns.conv2d_bias", make_conv_relu_pattern(with_bias=True, with_relu=False), check_conv)
     conv2d_bias_relu_pat = ("bnns.conv2d_bias_relu", make_conv_relu_pattern(with_bias=True, with_relu=True), check_conv)
     conv2d_relu_pat = ("bnns.conv2d_relu", make_conv_relu_pattern(with_bias=False, with_relu=True), check_conv)
-    bnns_patterns = [conv2d_bias_relu_pat, conv2d_relu_pat, conv2d_bias_pat]
+    dense_bias_gelu = ("bnns.dense_bias_gelu", make_dense_bias_gelu_pattern(), check_dense),
+    dense_bias = ("bnns.dense_bias", make_dense_bias_pattern(), check_dense),
+    bnns_patterns = [
+        conv2d_bias_relu_pat,
+        conv2d_relu_pat,
+        conv2d_bias_pat,
+        dense_bias_gelu,
+        dense_bias,
+    ]
     return bnns_patterns
