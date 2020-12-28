@@ -190,6 +190,7 @@ namespace BNNS {
         return res;
       }
       LOG(FATAL) << "Unknown case of BNNS tensor interpretation";
+      return bnns_nd_desc;
     };
 
     BNNSLayerData get_bnns_layer_data() const {
