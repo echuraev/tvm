@@ -84,10 +84,6 @@ namespace BNNS {
         is_external_data = false;
       }
 
-      if (one_of(shape.size(), 1, 2)) {
-          initVector(shape, dtype, hdl);
-          return;
-      }
 #if USE_OLD_BNNS_API
       ICHECK(one_of(shape.size(), 3, 4));
       const auto dim_shift = (shape.size() == 4) ? 1 : 0;
@@ -133,23 +129,6 @@ namespace BNNS {
       }
     }
 
-    void initVector(Shape shape, Dtype dtype, void* hdl) {
-      auto flags = BNNSNDArrayFlags(0);
-      bnns_nd_desc = {
-          flags,    /* flags */
-          BNNSDataLayoutVector,   /* layout */
-          {},    /* shape */
-          {},       /* stride */
-          nullptr,  /* data */
-          BNNSDataTypeFloat32, /* data_type */
-          nullptr,  /* table data */
-          BNNSDataTypeFloat32, /* table data_type */
-          0,        /* scale */
-          0         /* bias */
-      };
-      std::copy(shape.rbegin(), shape.rend(), std::begin(bnns_nd_desc.size));
-    }
-
     Dtype get_data_type() const { return bnns_desc.data_type; }
     size_t get_elem_size() const { return bnns_desc.data_type & 0xffff; }
 
@@ -176,7 +155,7 @@ namespace BNNS {
 
     const BNNSImageStackDescriptor& get_desc() const { return bnns_desc; };
 
-    const BNNSNDArrayDescriptor& get_nd_desc(size_t nd = 0) const {
+    const BNNSNDArrayDescriptor get_nd_desc(size_t nd = 0) const {
       auto original_nd = real_shape.size();
       // Ask of original descriptor
       if (original_nd == nd || nd == 0)
@@ -492,6 +471,9 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
     BNNSActivation activation = {BNNSActivationFunctionIdentity};
     if (has_gelu) {
         activation = {BNNSActivationFunctionGELUApproximation};
+        activation.alpha = std::sqrt(2.0 / M_PI);
+        activation.beta = 0.044715;
+    }
     }
 
     BNNSLayerParametersFullyConnected layerParameters = {

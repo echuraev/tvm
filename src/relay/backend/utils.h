@@ -255,8 +255,33 @@ inline bool IsOp(const CallNode* call, const std::string& op_name) {
   const auto* op_node = call->op.as<OpNode>();
   ICHECK(op_node) << "Expects a single op.";
   Op op = GetRef<Op>(op_node);
-  std::cout << "IsOp name node: " << op_node->name.c_str() << ", op_name: " << op_name << ", op: " << op->name.c_str() << std::endl;
   return op == Op::Get(op_name);
+}
+
+/*!
+ * \brief Retrieve the expected "root" op nested inside a fused call, such as conv2d in relu(add(conv2d))
+ * \param call A Relay call node. Typically nn.relu when called the first time.
+ * \param max_depth The maximum number of calls before the root op, counting from current_call.
+ * \param root_name The name of expected "root" op in this fused call.
+ * \return A CallNode corresponding to the root op
+ */
+
+inline const CallNode* FindExpRootCall(const CallNode* current_call, int max_depth,
+                                       const std::string& root_name) {
+  ICHECK(current_call && max_depth >= 0);
+
+  if (max_depth == 0) {
+    ICHECK(current_call && IsOp(current_call, root_name));
+    return current_call;
+  }
+  if (IsOp(current_call, root_name)) {
+    return current_call;
+  }
+
+  ICHECK_GT(current_call->args.size(), 0);
+
+  const auto* next_call = current_call->args[0].as<CallNode>();
+  return FindExpRootCall(next_call, max_depth - 1, root_name);
 }
 
 /*!
