@@ -29,7 +29,6 @@
 #include <tvm/runtime/module.h>
 #include <tvm/runtime/registry.h>
 
-#include <fstream>
 #include <numeric>
 #include <sstream>
 
@@ -116,6 +115,72 @@ runtime::Module BNNSCompiler(const ObjectRef& ref) {
 }
 
 TVM_REGISTER_GLOBAL("relay.ext.bnns").set_body_typed(BNNSCompiler);
+
+/*!
+ * \brief A helper to expand the params by adding the ones used by BNNS runtime
+ * for a given expression. Same as default ConstantUpdater but skip essential
+ * BNNS composed function nodes.
+ */
+struct BNNSConstantUpdater : public ConstantUpdater {
+ public:
+  BNNSConstantUpdater(const std::string& symbol,
+                      std::unordered_map<std::string, runtime::NDArray>* params,
+                      std::vector<std::string> &skip_mask)
+      : ConstantUpdater(symbol, params), skip_mask_(skip_mask) {}
+
+  /**!
+   * Like an original implementation but avoid visiting of body nodes
+   * for BNNS specific composite primitives.
+   */
+  void VisitExpr_(const FunctionNode* op) final override {
+    this->VisitSpan(op->span);
+    for (auto param : op->params) {
+      this->VisitExpr(param);
+    }
+
+    if (!isBNNSSpecificComposite(op)) {
+      this->VisitExpr(op->body);
+    }
+  }
+
+ private:
+  bool isBNNSSpecificComposite(const FunctionNode* op) {
+    auto comp = op->GetAttr<String>(attr::kComposite);
+    if (!comp)
+      return false;
+
+    auto comp_name = comp.value();
+
+    bool is_match = false;
+    for (const auto &mask : skip_mask_) {
+      if (std::string(comp_name).substr(0, mask.size()) == mask) {
+        is_match = true;
+        break;
+      }
+    }
+    return is_match;
+  }
+
+  std::vector<std::string> skip_mask_;
+};
+
+Map<String, runtime::NDArray> BNNSConstantUpdaterFunc(Expr expr, std::string symbol) {
+  std::vector<std::string> filter_by_mask = {"bnns."};
+
+  // Visit all suitable constant nodes
+  std::unordered_map<std::string, runtime::NDArray> res;
+  BNNSConstantUpdater const_updater(symbol, &res, filter_by_mask);
+  const_updater(expr);
+
+  // Convert to tvm::Map
+  Map<String, runtime::NDArray> ret;
+  for (const auto& kvp: res)
+    ret.Set(kvp.first, kvp.second);
+  return ret;
+}
+
+TVM_REGISTER_GLOBAL("relay.ext.bnns.constant_updater")
+    .set_body_typed(BNNSConstantUpdaterFunc);
 
 }  // namespace contrib
 }  // namespace relay
