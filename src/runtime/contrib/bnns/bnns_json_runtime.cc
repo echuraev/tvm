@@ -474,7 +474,6 @@ class BNNSJSONRuntime : public JSONRuntimeBase {
         activation.alpha = std::sqrt(2.0 / M_PI);
         activation.beta = 0.044715;
     }
-    }
 
     BNNSLayerParametersFullyConnected layerParameters = {
         in_desc,

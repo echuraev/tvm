@@ -23,8 +23,8 @@ from tvm import relay
 from tvm import rpc
 from tvm.relay import transform
 from tvm.contrib import graph_runtime
-from tvm.relay.op.contrib import arm_compute_lib
 from tvm.relay.op.contrib.register import get_pattern_table
+from tvm.relay.op.contrib.bnns import partition_for_bnns
 from tvm.contrib import utils
 from tvm.autotvm.measure import request_remote
 
@@ -52,22 +52,11 @@ def build_module(mod, target, params=None, enable_bnns=True, tvm_ops=0, acl_part
     """Build module with option to build for BNNS."""
     if isinstance(mod, tvm.relay.expr.Call):
         mod = tvm.IRModule.from_expr(mod)
-    with tvm.transform.PassContext(opt_level=3, disabled_pass=["AlterOpLayout"]):
+    with tvm.transform.PassContext(opt_level=3):
         if enable_bnns:
-            target_annotation_pass = tvm.transform.Sequential(
-                [
-                    transform.InferType(),
-                    transform.FoldConstant(),
-                    transform.FoldScaleAxis(),
-                    transform.MergeComposite(get_pattern_table('bnns')),
-                    transform.AnnotateTarget('bnns'),
-                    transform.MergeCompilerRegions(),
-                    transform.PartitionGraph(),
-                ]
-            )
-            mod = target_annotation_pass(mod)
+            mod = partition_for_bnns(mod)
         relay.backend.compile_engine.get().clear()
-        return relay.build(mod, target=target, params=params)
+        return relay.build(mod, target=target, target_host=target, params=params)
 
 
 def update_lib(lib, device, cross_compile):
