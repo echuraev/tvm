@@ -32,6 +32,7 @@ from .infrastructure import (
     skip_runtime_test,
     skip_codegen_test,
     build_module,
+    verify_codegen,
 )
 
 
@@ -39,19 +40,11 @@ def _get_model(shape, weight_shape, units, dtype, var_names, has_bias=False, has
     """Return a model and any parameters it may have"""
     a = relay.var(next(var_names), shape=shape, dtype=dtype)
     w = tvm.nd.array(np.random.uniform(-128, 127, weight_shape).astype(dtype))
-    print("*" * 50)
-    print(w.shape)
-    print(w)
-    print("*" * 50)
     weights = relay.const(w, dtype)
     out = relay.nn.dense(a, weights, units=units, out_dtype=dtype)
     params = {"w": w}
     if has_bias:
         b = tvm.nd.array(np.random.randint(-128, 127, weight_shape[0]).astype(dtype))
-        print("B" * 50)
-        print(b.shape)
-        print(b)
-        print("B" * 50)
         biasc = relay.const(b, dtype)
         out = relay.op.add(out, biasc)
         params["b"] = b
@@ -70,57 +63,55 @@ def _get_model(shape, weight_shape, units, dtype, var_names, has_bias=False, has
     return out, params
 
 
-#def test_dense():
-#    Device.load("test_config.json")
-#
-#    if skip_runtime_test():
-#        return
-#
-#    device = Device()
-#    np.random.seed(0)
-#
-#    dtype = ["float32"]
-#    shape = [
-#        ((1, 128), (16, 128), 16),
-#        ((32, 32), (32, 32), 32),
-#        ((1, 64), (1, 64), 1),
-#        ((11, 2), (2, 2), 2),
-#        ((2, 2), (1, 2), 1),
-#    ]
-#    composite = [False, True]
-#    trials = generate_trials([dtype, shape, composite], 3)
-#
-#    for dtype, (shape, weight_shape, units), composite in trials:
-#        outputs = []
-#        inputs = {"a": tvm.nd.array(np.random.uniform(-128, 127, shape).astype(dtype))}
-#        func, params = _get_model(
-#            shape, weight_shape, units, dtype, var_names=iter(inputs), has_bias=composite
-#        )
-#        for bnns in [False, True]:
-#            outputs.append(
-#                build_and_run(
-#                    func,
-#                    inputs,
-#                    1,
-#                    params,
-#                    device,
-#                    build_module,
-#                    enable_framework=bnns,
-#                )[0]
-#            )
-#
-#        config = {
-#            "shape": shape,
-#            "weight_shape": weight_shape,
-#            "units": units,
-#            "dtype": dtype,
-#            "composite operators (bias)": composite,
-#        }
-#        verify(outputs, atol=0.001, rtol=0.01, config=config)
+def _get_expected_codegen(shape, weight_shape, units, dtype, has_bias=False, has_gelu=False):
+    output_shape = (shape[0], units)
+    name = "nn.dense"
+    if has_bias is True:
+        name = "bnns.dense_bias"
+    if has_bias is True and has_gelu is True:
+        name = "bnns.dense_bias_gelu"
 
-def test_dense_bias_gelu():
-    Device.load("test_config.json")
+    node = {
+        "op": "kernel",
+        "name": name,
+        "inputs": [],
+        "attrs": {
+            "num_outputs": "1",
+            "out_dtype": [["float32"]],
+            "shape": [[list(output_shape)]],
+            "dtype": [[dtype]],
+            "units": [[str(units)]],
+        },
+    }
 
+    inputs = [
+        {"op": "input", "name": "", "attrs": {"shape": [[list(shape)]], "dtype": [[str(dtype)]]}},
+        {
+            "op": "const",
+            "name": "",
+            "attrs": {"shape": [[list(weight_shape)]], "dtype": [[str(dtype)]]},
+        },
+    ]
+
+    if has_bias:
+        inputs.append(
+            {
+                "op": "const",
+                "name": "",
+                "attrs": {"shape": [[[weight_shape[0]]]], "dtype": [["float32"]]},
+            }
+        )
+
+    input_idx = 0
+    for _ in range(len(inputs)):
+        node["inputs"].append([input_idx, 0, 0])
+        input_idx += 1
+    node["attrs"]["num_inputs"] = str(len(inputs))
+    inputs.append(node)
+    return inputs
+
+
+def test_dense():
     if skip_runtime_test():
         return
 
@@ -136,15 +127,15 @@ def test_dense_bias_gelu():
         ((2, 2), (1, 2), 1),
     ]
     composite = [False, True]
-    trials = generate_trials([dtype, shape, composite], 3)
+    trials = generate_trials([dtype, shape, composite, composite], 3)
 
-    for dtype, (shape, weight_shape, units), composite in trials:
+    for dtype, (shape, weight_shape, units), with_bias, with_gelu in trials:
         outputs = []
         inputs = {"a": tvm.nd.array(np.random.uniform(-128, 127, shape).astype(dtype))}
         func, params = _get_model(
-            shape, weight_shape, units, dtype, var_names=iter(inputs), has_bias=True, has_gelu=True
+            shape, weight_shape, units, dtype, var_names=iter(inputs), has_bias=with_bias, has_gelu=with_gelu
         )
-        for bnns in [True]:
+        for bnns in [False, True]:
             outputs.append(
                 build_and_run(
                     func,
@@ -162,12 +153,40 @@ def test_dense_bias_gelu():
             "weight_shape": weight_shape,
             "units": units,
             "dtype": dtype,
-            "composite operators (bias)": composite,
+            "with_bias": with_bias,
+            "with_gelu": with_gelu,
         }
         verify(outputs, atol=0.001, rtol=0.01, config=config)
 
 
+def test_codegen_dense():
+    if skip_codegen_test():
+        return
+
+    np.random.seed(0)
+
+    dtype = ["float32"]
+    shape = [
+        ((1, 128), (16, 128), 16),
+        ((32, 32), (32, 32), 32),
+        ((1, 64), (1, 64), 1),
+        ((11, 2), (2, 2), 2),
+        ((2, 2), (1, 2), 1),
+    ]
+    composite = [False, True]
+    trials = generate_trials([dtype, shape, composite, composite], 3)
+
+    for dtype, (shape, weight_shape, units), with_bias, with_gelu in trials:
+        inputs = {"a"}
+
+        args = (shape, weight_shape, units, dtype)
+
+        func, params = _get_model(*args, var_names=iter(inputs), has_bias=with_bias, has_gelu=with_gelu)
+        exp_codegen = _get_expected_codegen(*args, has_bias=with_bias, has_gelu=with_gelu)
+        verify_codegen(func, exp_codegen, 1)
+
+
 if __name__ == "__main__":
-    #test_dense()
-    test_dense_bias_gelu()
+    test_dense()
+    test_codegen_dense()
 

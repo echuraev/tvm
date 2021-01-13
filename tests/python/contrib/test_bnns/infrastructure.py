@@ -18,6 +18,8 @@
 import sys
 sys.path.append('..')
 
+import json
+
 import tvm
 from tvm import relay
 from tvm import rpc
@@ -73,3 +75,41 @@ def update_lib(lib, device, cross_compile):
     return lib
 
 
+def extract_bnns_modules(module):
+    """Get the BNNS module(s) from llvm module."""
+    return list(
+        filter(lambda mod: mod.type_key == "bnns_json", module.get_lib().imported_modules)
+    )
+
+
+def verify_codegen(
+    module,
+    known_good_codegen,
+    num_bnns_modules,
+    tvm_ops=0,
+    target=Device.target,
+):
+    """Check BNNS codegen against a known good output."""
+    module = build_module(module, target, tvm_ops=tvm_ops)
+    bnns_modules = extract_bnns_modules(module)
+
+    assert len(bnns_modules) == num_bnns_modules, (
+        f"The number of BNNS modules produced ({len(bnns_modules)}) does not "
+        f"match the expected value ({num_bnns_modules})."
+    )
+
+    for mod in bnns_modules:
+        source = mod.get_source("json")
+        codegen = json.loads(source)["nodes"]
+        # remove input and const names as these cannot be predetermined
+        for node in range(len(codegen)):
+            if codegen[node]["op"] == "input" or codegen[node]["op"] == "const":
+                codegen[node]["name"] = ""
+        codegen_str = json.dumps(codegen, sort_keys=True, indent=2)
+        known_good_codegen_str = json.dumps(known_good_codegen, sort_keys=True, indent=2)
+
+        assert codegen_str == known_good_codegen_str, (
+            f"The JSON produced by codegen does not match the expected result. \n"
+            f"Actual={codegen_str} \n"
+            f"Expected={known_good_codegen_str}"
+        )
