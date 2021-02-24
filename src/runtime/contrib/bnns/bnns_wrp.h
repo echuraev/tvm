@@ -428,6 +428,37 @@ class NormPrimitive : public Primitive {
 };
 
 /**
+ * Wrapper on top of BNNS::Primitive
+ *
+ * This primitive should be used for executing pooling filter
+ */
+class PoolingPrimitive : public Primitive {
+ public:
+  PoolingPrimitive(const std::vector<BNNSFilter> fs, const TView& src, const TView& dst)
+      : Primitive(fs, src, dst) {}
+
+  /** Execute primitive with using specified src/dst */
+  void execute() override {
+    auto res = TVMBackendParallelLaunch(run_task, this, filters.size());
+    ICHECK_EQ(res, 0) << "BNNS runtime. Primitive was not executed properly";
+  }
+
+ private:
+  static int run_task(int task_id, TVMParallelGroupEnv* penv, void* cdata) {
+    auto prim = reinterpret_cast<PoolingPrimitive*>(cdata);
+    const auto filter = prim->filters[task_id];
+    const auto src_view = prim->src_view[task_id];
+    const auto dst_view = prim->dst_view[task_id];
+
+    size_t mb = src_view.get_batch_size();
+    auto sts = BNNSPoolingFilterApplyBatch(filter, mb, src_view.get_data_hdl(),
+                                           src_view.get_stride(), dst_view.get_data_hdl(),
+                                           dst_view.get_stride(), nullptr, 0);
+    return sts;
+  }
+};
+
+/**
  * Function which split primitive into sub primitives to parallel execution
  *
  * @param num requested num of sub primitives
