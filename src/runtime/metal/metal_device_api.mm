@@ -98,13 +98,16 @@ kernel void CopyKernel(
 // But we keep this code.
 int GetWarpSize(id<MTLDevice> dev) {
   NSError* error_msg = nil;
-  id<MTLLibrary> lib = [dev newLibraryWithSource:[NSString stringWithUTF8String:kDummyKernel]
-                                         options:nil
-                                           error:&error_msg];
-  ICHECK(lib != nil) << [[error_msg localizedDescription] UTF8String];
-  id<MTLFunction> f = [lib newFunctionWithName:[NSString stringWithUTF8String:"CopyKernel"]];
-  ICHECK(f != nil);
-  id<MTLComputePipelineState> state = [dev newComputePipelineStateWithFunction:f error:&error_msg];
+  id<MTLComputePipelineState> state;
+  @autoreleasepool {
+    id<MTLLibrary> lib = [dev newLibraryWithSource:[NSString stringWithUTF8String:kDummyKernel]
+                                           options:nil
+                                             error:&error_msg];
+    ICHECK(lib != nil) << [[error_msg localizedDescription] UTF8String];
+    id<MTLFunction> f = [lib newFunctionWithName:[NSString stringWithUTF8String:"CopyKernel"]];
+    ICHECK(f != nil);
+    state = [dev newComputePipelineStateWithFunction:f error:&error_msg];
+  }
   ICHECK(state != nil) << [[error_msg localizedDescription] UTF8String];
   return static_cast<int>(state.threadExecutionWidth);
 }
@@ -180,59 +183,61 @@ void MetalWorkspace::CopyDataFromTo(const void* from, size_t from_offset, void* 
   TVMContext ctx = ctx_from;
   if (ctx_from.device_type == kDLCPU) ctx = ctx_to;
   id<MTLCommandQueue> queue = GetCommandQueue(ctx);
-  id<MTLCommandBuffer> cb = [queue commandBuffer];
-  int from_dev_type = static_cast<int>(ctx_from.device_type);
-  int to_dev_type = static_cast<int>(ctx_to.device_type);
+  @autoreleasepool {
+    id<MTLCommandBuffer> cb = [queue commandBuffer];
+    int from_dev_type = static_cast<int>(ctx_from.device_type);
+    int to_dev_type = static_cast<int>(ctx_to.device_type);
 
-  if (from_dev_type == kDLMetal && to_dev_type == kDLMetal) {
-    ICHECK_EQ(ctx_from.device_id, ctx_to.device_id) << "Metal disallow cross device copy.";
-    id<MTLBlitCommandEncoder> encoder = [cb blitCommandEncoder];
-    [encoder copyFromBuffer:(__bridge id<MTLBuffer>)(from)
-               sourceOffset:from_offset
-                   toBuffer:(__bridge id<MTLBuffer>)(to)destinationOffset:to_offset
-                       size:size];
-    [encoder endEncoding];
-    [cb commit];
-  } else if (from_dev_type == kDLMetal && to_dev_type == kDLCPU) {
-    // copy to a local buffer before get into global buffer.
-    id<MTLBuffer> from_buf = (__bridge id<MTLBuffer>)(from);
-    if (from_buf.storageMode != MTLStorageModeShared) {
-      id<MTLBuffer> temp = MetalThreadEntry::ThreadLocal()->GetTempBuffer(ctx_from, size);
+    if (from_dev_type == kDLMetal && to_dev_type == kDLMetal) {
+      ICHECK_EQ(ctx_from.device_id, ctx_to.device_id) << "Metal disallow cross device copy.";
       id<MTLBlitCommandEncoder> encoder = [cb blitCommandEncoder];
-      [encoder copyFromBuffer:from_buf
+      [encoder copyFromBuffer:(__bridge id<MTLBuffer>)(from)
                  sourceOffset:from_offset
-                     toBuffer:temp
-            destinationOffset:0
+                     toBuffer:(__bridge id<MTLBuffer>)(to)destinationOffset:to_offset
                          size:size];
       [encoder endEncoding];
       [cb commit];
-      [cb waitUntilCompleted];
-      memcpy(static_cast<char*>(to) + to_offset, static_cast<char*>([temp contents]), size);
+    } else if (from_dev_type == kDLMetal && to_dev_type == kDLCPU) {
+      // copy to a local buffer before get into global buffer.
+      id<MTLBuffer> from_buf = (__bridge id<MTLBuffer>)(from);
+      if (from_buf.storageMode != MTLStorageModeShared) {
+        id<MTLBuffer> temp = MetalThreadEntry::ThreadLocal()->GetTempBuffer(ctx_from, size);
+        id<MTLBlitCommandEncoder> encoder = [cb blitCommandEncoder];
+        [encoder copyFromBuffer:from_buf
+                   sourceOffset:from_offset
+                       toBuffer:temp
+              destinationOffset:0
+                           size:size];
+        [encoder endEncoding];
+        [cb commit];
+        [cb waitUntilCompleted];
+        memcpy(static_cast<char*>(to) + to_offset, static_cast<char*>([temp contents]), size);
+      } else {
+        memcpy(static_cast<char*>(to) + to_offset,
+               static_cast<char*>([from_buf contents]) + from_offset, size);
+      }
+    } else if (from_dev_type == kDLCPU && to_dev_type == kDLMetal) {
+      id<MTLBuffer> to_buf = (__bridge id<MTLBuffer>)(to);
+      if (to_buf.storageMode != MTLStorageModeShared) {
+        id<MTLBuffer> temp = MetalThreadEntry::ThreadLocal()->GetTempBuffer(ctx_to, size);
+        memcpy([temp contents], static_cast<const char*>(from) + from_offset, size);
+        id<MTLBlitCommandEncoder> encoder = [cb blitCommandEncoder];
+        [encoder copyFromBuffer:temp
+                   sourceOffset:0
+                       toBuffer:to_buf
+              destinationOffset:to_offset
+                           size:size];
+        [encoder endEncoding];
+        [cb commit];
+        [cb waitUntilCompleted];
+      } else {
+        memcpy(static_cast<char*>([to_buf contents]) + to_offset,
+               static_cast<const char*>(from) + from_offset, size);
+      }
     } else {
-      memcpy(static_cast<char*>(to) + to_offset,
-             static_cast<char*>([from_buf contents]) + from_offset, size);
+      LOG(FATAL) << "Expect copy from/to Metal or between Metal"
+                 << ", from=" << from_dev_type << ", to=" << to_dev_type;
     }
-  } else if (from_dev_type == kDLCPU && to_dev_type == kDLMetal) {
-    id<MTLBuffer> to_buf = (__bridge id<MTLBuffer>)(to);
-    if (to_buf.storageMode != MTLStorageModeShared) {
-      id<MTLBuffer> temp = MetalThreadEntry::ThreadLocal()->GetTempBuffer(ctx_to, size);
-      memcpy([temp contents], static_cast<const char*>(from) + from_offset, size);
-      id<MTLBlitCommandEncoder> encoder = [cb blitCommandEncoder];
-      [encoder copyFromBuffer:temp
-                 sourceOffset:0
-                     toBuffer:to_buf
-            destinationOffset:to_offset
-                         size:size];
-      [encoder endEncoding];
-      [cb commit];
-      [cb waitUntilCompleted];
-    } else {
-      memcpy(static_cast<char*>([to_buf contents]) + to_offset,
-             static_cast<const char*>(from) + from_offset, size);
-    }
-  } else {
-    LOG(FATAL) << "Expect copy from/to Metal or between Metal"
-               << ", from=" << from_dev_type << ", to=" << to_dev_type;
   }
 }
 
@@ -240,9 +245,11 @@ void MetalWorkspace::StreamSync(TVMContext ctx, TVMStreamHandle stream) {
   ICHECK(stream == nullptr);
   // commit an empty command buffer and wait until it completes.
   id<MTLCommandQueue> queue = GetCommandQueue(ctx);
-  id<MTLCommandBuffer> cb = [queue commandBuffer];
-  [cb commit];
-  [cb waitUntilCompleted];
+  @autoreleasepool {
+    id<MTLCommandBuffer> cb = [queue commandBuffer];
+    [cb commit];
+    [cb waitUntilCompleted];
+  }
 }
 
 void* MetalWorkspace::AllocWorkspace(TVMContext ctx, size_t size, DLDataType type_hint) {

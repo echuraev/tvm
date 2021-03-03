@@ -188,24 +188,26 @@ class MetalWrappedFunc {
     }
     ThreadWorkLoad wl = thread_axis_cfg_.Extract(args);
     id<MTLCommandQueue> queue = w_->GetCommandQueue(t->context);
-    id<MTLCommandBuffer> cb = [queue commandBuffer];
-    id<MTLComputeCommandEncoder> encoder = [cb computeCommandEncoder];
-    [encoder setComputePipelineState:scache_[device_id]];
-    for (size_t i = 0; i < num_buffer_args_; ++i) {
-      void* buf = args[static_cast<int>(i)];
-      [encoder setBuffer:(__bridge id<MTLBuffer>)(buf) offset:0 atIndex:i];
+    @autoreleasepool {
+      id<MTLCommandBuffer> cb = [queue commandBuffer];
+      id<MTLComputeCommandEncoder> encoder = [cb computeCommandEncoder];
+      [encoder setComputePipelineState:scache_[device_id]];
+      for (size_t i = 0; i < num_buffer_args_; ++i) {
+        void* buf = args[static_cast<int>(i)];
+        [encoder setBuffer:(__bridge id<MTLBuffer>)(buf) offset:0 atIndex:i];
+      }
+      if (num_pack_args_ != 0) {
+        [encoder setBytes:pack_args
+                   length:num_pack_args_ * sizeof(ArgUnion)
+                  atIndex:num_buffer_args_];
+      }
+      // launch
+      MTLSize dimGrid = MTLSizeMake(wl.grid_dim(0), wl.grid_dim(1), wl.grid_dim(2));
+      MTLSize dimBlock = MTLSizeMake(wl.block_dim(0), wl.block_dim(1), wl.block_dim(2));
+      [encoder dispatchThreadgroups:dimGrid threadsPerThreadgroup:dimBlock];
+      [encoder endEncoding];
+      [cb commit];
     }
-    if (num_pack_args_ != 0) {
-      [encoder setBytes:pack_args
-                 length:num_pack_args_ * sizeof(ArgUnion)
-                atIndex:num_buffer_args_];
-    }
-    // launch
-    MTLSize dimGrid = MTLSizeMake(wl.grid_dim(0), wl.grid_dim(1), wl.grid_dim(2));
-    MTLSize dimBlock = MTLSizeMake(wl.block_dim(0), wl.block_dim(1), wl.block_dim(2));
-    [encoder dispatchThreadgroups:dimGrid threadsPerThreadgroup:dimBlock];
-    [encoder endEncoding];
-    [cb commit];
   }
 
  private:
