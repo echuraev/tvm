@@ -72,6 +72,8 @@ cl::BufferDescriptor::MemoryLayout cl::BufferDescriptor::MemoryLayoutFromScope(
     return cl::BufferDescriptor::MemoryLayout::kImage2DActivation;
   } else if (mem_scope.value() == "global.texture-weight") {
     return cl::BufferDescriptor::MemoryLayout::kImage2DWeight;
+  } else if (mem_scope.value() == "global.texture-nhwc") {
+    return cl::BufferDescriptor::MemoryLayout::kTexture2DNHWC;
   }
   LOG(FATAL) << "No memory layout defined for memory of scope: " << mem_scope.value();
   return cl::BufferDescriptor::MemoryLayout::kBuffer1D;
@@ -85,6 +87,8 @@ String cl::BufferDescriptor::ScopeFromMemoryLayout(cl::BufferDescriptor::MemoryL
       return "global.texture";
     case cl::BufferDescriptor::MemoryLayout::kImage2DWeight:
       return "global.texture-weight";
+    case cl::BufferDescriptor::MemoryLayout::kTexture2DNHWC:
+      return "global.texture-nhwc";
   }
   LOG(FATAL) << "No scope corresponding to the provided memory layout: "
              << static_cast<int>(layout);

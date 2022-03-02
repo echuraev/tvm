@@ -345,6 +345,7 @@ struct BufferDescriptor {
      *         e.g. image2d[height=O, width=IHW]
      */
     kImage2DWeight,
+    kTexture2DNHWC,
   };
   BufferDescriptor() = default;
   explicit BufferDescriptor(Optional<String> scope) : layout(MemoryLayoutFromScope(scope)) {}
