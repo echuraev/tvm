@@ -21,6 +21,7 @@ from tvm import topi
 from .generic import *
 from .. import op as _op
 
+@conv2d_NCHWc_strategy.register("adreno")
 @conv2d_strategy.register("adreno")
 def conv2d_strategy_adreno(attrs, inputs, out_type, target):
     """conv2d adreno strategy"""
