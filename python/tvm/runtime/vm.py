@@ -584,6 +584,7 @@ class VirtualMachine(object):
         number=5,
         min_repeat_ms=None,
         end_to_end=False,
+        cooldown_interval_ms=0,
         **kwargs,
     ):
         """Calculate runtime of a function by repeatedly calling it.
@@ -633,6 +634,9 @@ class VirtualMachine(object):
             returned tensors in the total runtime. This will give accurate timings for end to end
             workloads.
 
+        cooldown_interval_ms : Optional[float]
+            The cool down interval between two measurements in milliseconds.
+
         args : Sequence[Object]
             Arguments to the function. These are cached before running timing code, so that data
             transfer costs are not counted in the runtime.
@@ -667,5 +671,10 @@ class VirtualMachine(object):
         if args or kwargs:
             self.set_input(func_name, *args, **kwargs)
         return self.module.time_evaluator(
-            "invoke", device, repeat=repeat, number=number, min_repeat_ms=min_repeat_ms
+            "invoke",
+            device,
+            repeat=repeat,
+            number=number,
+            min_repeat_ms=min_repeat_ms,
+            cooldown_interval_ms=cooldown_interval_ms,
         )(func_name)

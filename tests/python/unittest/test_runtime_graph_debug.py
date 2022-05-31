@@ -151,6 +151,7 @@ def test_end_to_end_graph_simple(graph, n, A, B, s, myadd):
             "Shape",
             "Inputs",
             "Outputs",
+            "Times",
         ]
         myadd_lines = split_debug_line(2)
         assert myadd_lines[0] == "add"
@@ -243,12 +244,26 @@ def test_run_single_node(graph, n, A, myadd):
     # Increasing the number of repeats should give you the number of results asked for
     assert len(mod.run_individual_node(1, repeat=10).results) == 10
 
+    # The amount of measurement batches must be equal to the amount of results.
+    # And amount of measurements in one batch must be equal to `number` or greater depending on `min_repeat_ms`.
+    repeat_10_number_2_result = mod.run_individual_node(1, number=2, repeat=10, min_repeat_ms=0)
+    assert len(repeat_10_number_2_result.results) == 10
+    assert len(repeat_10_number_2_result.measurements) == 10
+    assert len(repeat_10_number_2_result.measurements[0]) == 2
+
     # Doing repeat_ms should have the run time greater than the asked amount
     start = time.time()
     mod.run_individual_node(1, min_repeat_ms=500)
     end = time.time()
     elapsed_time_in_seconds = end - start
     assert elapsed_time_in_seconds >= 0.5
+
+    # Doing `cooldown_interval_ms` should have the execution time increases
+    start = time.time()
+    mod.run_individual_node(1, repeat=2, min_repeat_ms=500, cooldown_interval_ms=1000)
+    end = time.time()
+    elapsed_time_in_seconds = end - start
+    assert elapsed_time_in_seconds >= 1.5
 
     # Going out of bounds of node index throws a tvm error
     with pytest.raises(TVMError):

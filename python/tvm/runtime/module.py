@@ -20,6 +20,7 @@
 import os
 import ctypes
 import struct
+import itertools
 from typing import Sequence
 import numpy as np
 
@@ -34,13 +35,13 @@ from . import _ffi_api
 class BenchmarkResult:
     """Runtimes from benchmarking"""
 
-    def __init__(self, results: Sequence[float]):
+    def __init__(self, measurements: Sequence[Sequence[float]]):
         """Construct a new BenchmarkResult from a sequence of runtimes.
 
         Parameters
         ----------
-        results : Sequence[float]
-            Raw times from benchmarking
+        measurements : Sequence[Sequence[float]]
+            Array of raw time arrays based on benchmarking results
 
         Attributes
         ----------
@@ -65,8 +66,12 @@ class BenchmarkResult:
         results : Sequence[float]
             The collected runtimes (in seconds). This may be a series of mean runtimes if
             py:meth:`Module.time_evaluator` or `benchmark` was run with `number` > 1.
+        measurements : Sequence[Sequence[float]]:
+            # raw data from which the `repeat` costs were calculated, i. e., the results of the
+            #  `number` call costs.
         """
-        self.results = results
+        self.results = [np.mean(results) for results in measurements]
+        self.measurements = measurements
         self.mean = np.mean(self.results)
         self.std = np.std(self.results)
         self.median = np.median(self.results)
@@ -94,6 +99,25 @@ class BenchmarkResult:
             self.min * 1000,
             self.std * 1000,
         )
+
+    def get_measurement_sequence(self):
+        """Returns measurements as a sequential one-dimensional array.
+
+        Returns
+        -------
+        An array of measurement values
+        """
+        return list(itertools.chain.from_iterable(self.measurements))
+
+    def get_measurement_report(self):
+        """Prints a detailed report for each `repeat` using measurements."""
+        for i, result in enumerate(self.measurements):
+            result = result if isinstance(result, list) else [result]
+            print(
+                "Repeat #{} had {} internal runs. {}\n".format(
+                    i, len(result), BenchmarkResult(result)
+                )
+            )
 
 
 class Module(object):
@@ -270,7 +294,16 @@ class Module(object):
         """
         _ffi_api.ModuleSaveToFile(self, file_name, fmt)
 
-    def time_evaluator(self, func_name, dev, number=10, repeat=1, min_repeat_ms=0, f_preproc=""):
+    def time_evaluator(
+        self,
+        func_name,
+        dev,
+        number=10,
+        repeat=1,
+        min_repeat_ms=0,
+        cooldown_interval_ms=0,
+        f_preproc="",
+    ):
         """Get an evaluator that measures time cost of running function.
 
         Parameters
@@ -299,6 +332,10 @@ class Module(object):
             minimum duration requirement of one `repeat`.
             i.e., When the run time of one `repeat` falls below this time, the `number` parameter
             will be automatically increased.
+
+        cooldown_interval_ms: int, optional
+            The cool down interval between two measurements in milliseconds.
+
         f_preproc: str, optional
             The preprocess function name we want to execute before executing the time evaluator.
 
@@ -322,6 +359,7 @@ class Module(object):
                 number,
                 repeat,
                 min_repeat_ms,
+                cooldown_interval_ms,
                 f_preproc,
             )
 
@@ -329,9 +367,18 @@ class Module(object):
                 """Internal wrapped evaluator."""
                 # Wrap feval so we can add more stats in future.
                 blob = feval(*args)
-                fmt = "@" + ("d" * repeat)
-                results = struct.unpack(fmt, blob)
-                return BenchmarkResult(results)
+                measurements = []
+                offset = 0
+                format_size = "@q"
+                for _ in range(0, repeat):
+                    (n,) = struct.unpack_from(format_size, blob, offset)
+                    offset += struct.calcsize(format_size)
+                    format_data = "@" + n * "d"
+                    r = struct.unpack_from(format_data, blob, offset)
+                    offset += struct.calcsize(format_data)
+                    measurements.append([*r])
+
+                return BenchmarkResult(measurements)
 
             return evaluator
         except NameError:

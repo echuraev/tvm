@@ -1057,34 +1057,62 @@ export class Instance implements Disposable {
       dev: DLDevice,
       nstep: number,
       repeat: number,
-      minRepeatMs: number
+      minRepeatMs: number,
+      cooldownIntervalMs: number
     ): Promise<Uint8Array> => {
-      finvoke(this.scalar(1, "int32"));
+      finvoke();
       await dev.sync();
       const result = [];
       let setupNumber: number = nstep;
 
       for (let i = 0; i < repeat; ++i) {
         let durationMs = 0.0;
+        const resultLocal = [];
         do {
           if (durationMs > 0.0) {
             setupNumber = Math.floor(
               Math.max(minRepeatMs / (durationMs / setupNumber) + 1, setupNumber * 1.618)
             );
           }
-          const tstart: number = perf.now();
-          finvoke(this.scalar(setupNumber, "int32"));
-          await dev.sync();
-          const tend: number = perf.now();
-
-          durationMs = tend - tstart;
+          for (let j = 0; j < setupNumber; ++j) {
+            const tstart: number = perf.now();
+            finvoke();
+            await dev.sync();
+            const tend: number = perf.now();
+            let durationMsLocal = tend - tstart;
+            const speed = durationMsLocal / 1000;
+            resultLocal.push(speed);
+          }
+          durationMs = 0.0;
+          for (let j = 0; j < resultLocal.length; ++j) {
+            durationMs += resultLocal[j];
+          }
         } while (durationMs < minRepeatMs);
-        const speed = durationMs / setupNumber / 1000;
-        result.push(speed);
+        result.push(resultLocal);
+        await new Promise(r => setTimeout(r, cooldownIntervalMs));
       }
-      const ret = new Float64Array(result.length);
-      ret.set(result);
-      return new Uint8Array(ret.buffer);
+
+      let bufferLength = 0;
+      for (let i = 0; i < result.length; ++i) {
+        bufferLength += 8; // for the size value
+        bufferLength += result[i].length * 8; // for the array
+      }
+
+      const buffer = new Uint8Array(bufferLength);
+      let offset = 0;
+      for (let i = 0; i < result.length; ++i) {
+        const size = new BigInt64Array([BigInt(result[i].length)]);
+        const size_buf = new Uint8Array(size.buffer)
+        buffer.set(size_buf, offset);
+        offset += size_buf.length;
+        
+        const array = new Float64Array(result[i]);
+        const array_buf = new Uint8Array(array.buffer);
+        buffer.set(array_buf, offset);
+        offset += array_buf.length;
+      }
+            
+      return buffer;
     };
 
     const addOne = async (x: number): Promise<number> => {

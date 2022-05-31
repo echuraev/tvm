@@ -356,6 +356,7 @@ class GraphModule(object):
         number=5,
         min_repeat_ms=None,
         end_to_end=False,
+        cooldown_interval_ms=0,
         **kwargs,
     ):
         """Calculate runtime of a function by repeatedly calling it.
@@ -400,6 +401,9 @@ class GraphModule(object):
             milliseconds. This can be used to ensure that the function is run enough to get an
             accurate measurement.
 
+        cooldown_interval_ms : Optional[float]
+            The cool down interval between two measurements in milliseconds.
+
         end_to_end : bool
             If set, include time to transfer input tensors to the device and time to transfer
             returned tensors in the total runtime. This will give accurate timings for end to end
@@ -432,5 +436,10 @@ class GraphModule(object):
         if kwargs:
             self.set_input(**kwargs)
         return self.module.time_evaluator(
-            func_name, device, repeat=repeat, number=number, min_repeat_ms=min_repeat_ms
+            func_name,
+            device,
+            repeat=repeat,
+            number=number,
+            min_repeat_ms=min_repeat_ms,
+            cooldown_interval_ms=cooldown_interval_ms,
         )()

@@ -36,6 +36,7 @@
 #include <iostream>
 #include <map>
 #include <numeric>
+#include <thread>
 
 namespace tvm {
 namespace runtime {
@@ -799,7 +800,7 @@ TVM_REGISTER_GLOBAL("runtime.profiling.ProfileFunction")
     });
 
 PackedFunc WrapTimeEvaluator(PackedFunc pf, Device dev, int number, int repeat, int min_repeat_ms,
-                             PackedFunc f_preproc) {
+                             int cooldown_interval_ms, PackedFunc f_preproc) {
   ICHECK(pf != nullptr);
 
   if (static_cast<int>(dev.device_type) == static_cast<int>(kDLMicroDev)) {
@@ -808,8 +809,8 @@ PackedFunc WrapTimeEvaluator(PackedFunc pf, Device dev, int number, int repeat, 
     return (*get_micro_time_evaluator)(pf, dev, number, repeat);
   }
 
-  auto ftimer = [pf, dev, number, repeat, min_repeat_ms, f_preproc](TVMArgs args,
-                                                                    TVMRetValue* rv) mutable {
+  auto ftimer = [pf, dev, number, repeat, min_repeat_ms, cooldown_interval_ms, f_preproc](
+                    TVMArgs args, TVMRetValue* rv) mutable {
     TVMRetValue temp;
     std::ostringstream os;
     // skip first time call, to activate lazy compilation components.
@@ -822,25 +823,37 @@ PackedFunc WrapTimeEvaluator(PackedFunc pf, Device dev, int number, int repeat, 
         f_preproc.CallPacked(args, &temp);
       }
       double duration_ms = 0.0;
-
+      std::vector<double> results;
+      int64_t final_number = number;
       do {
+        results.clear();
         if (duration_ms > 0.0) {
-          number = static_cast<int>(std::max((min_repeat_ms / (duration_ms / number) + 1),
-                                             number * 1.618));  // 1.618 is chosen by random
+          final_number =
+              static_cast<int>(std::max((min_repeat_ms / (duration_ms / final_number) + 1),
+                                        final_number * 1.618));  // 1.618 is chosen by random
         }
+        results.resize(final_number);
 
-        Timer t = Timer::Start(dev);
-        // start timing
-        for (int i = 0; i < number; ++i) {
+        for (int i = 0; i < final_number; ++i) {
+          // start timing
+          Timer t = Timer::Start(dev);
           pf.CallPacked(args, &temp);
+          t->Stop();
+          int64_t t_nanos = t->SyncAndGetElapsedNanos();
+          results[i] = t_nanos / 1e6;
         }
-        t->Stop();
-        int64_t t_nanos = t->SyncAndGetElapsedNanos();
-        duration_ms = t_nanos / 1e6;
+        duration_ms = std::accumulate(results.begin(), results.end(), 0.0);
       } while (duration_ms < min_repeat_ms);
 
-      double speed = duration_ms / 1e3 / number;
-      os.write(reinterpret_cast<char*>(&speed), sizeof(speed));
+      // write the size value.
+      os.write(reinterpret_cast<char*>(&final_number), sizeof(int64_t));
+      // write the array
+      for (int i = 0; i < final_number; ++i) {
+        results[i] /= 1e3;
+        os.write(reinterpret_cast<char*>(&results[i]), sizeof(double));
+      }
+
+      std::this_thread::sleep_for(std::chrono::milliseconds(cooldown_interval_ms));
     }
 
     std::string blob = os.str();

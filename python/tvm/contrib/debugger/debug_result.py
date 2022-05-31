@@ -114,12 +114,10 @@ class DebugResult(object):
     def get_output_tensors(self):
         """Get the output tensors of each operation in numpy format"""
         eid = 0
-        order = 0
         output_tensors = {}
-        for i, (node, time) in enumerate(zip(self._nodes_list, self._time_list)):
+        for i, node in enumerate(self._nodes_list):
             num_outputs = self.get_graph_node_output_num(node)
             for j in range(num_outputs):
-                order += time[0]
 
                 # the node name is not unique, so we need a consistent
                 # indexing based on the list ordering in the nodes
@@ -157,7 +155,12 @@ class DebugResult(object):
             return t * 10**6
 
         starting_times = np.zeros(len(self._time_list) + 1)
-        starting_times[1:] = np.cumsum([times[0] for times in self._time_list])
+        starting_times[1:] = np.cumsum(
+            [
+                np.mean([np.mean(repeat_data) for repeat_data in node_data])
+                for node_data in self._time_list
+            ]
+        )
 
         def node_to_events(node, times, starting_time):
             return [
@@ -170,7 +173,9 @@ class DebugResult(object):
                 ),
                 ChromeTraceEvent(
                     # Use start + duration instead of end to ensure precise timings.
-                    ts=s_to_us(times[0] + starting_time),
+                    ts=s_to_us(
+                        np.mean([np.mean(repeat_data) for repeat_data in times]) + starting_time
+                    ),
                     tid=1,
                     pid=1,
                     ph="E",
@@ -205,12 +210,18 @@ class DebugResult(object):
 
     def get_debug_result(self, sort_by_time=True):
         """Return the debugger result"""
-        header = ["Node Name", "Ops", "Time(us)", "Time(%)", "Shape", "Inputs", "Outputs"]
-        lines = ["---------", "---", "--------", "-------", "-----", "------", "-------"]
+        header = ["Node Name", "Ops", "Time(us)", "Time(%)", "Shape", "Inputs", "Outputs", "Times"]
+        lines = ["---------", "---", "--------", "-------", "-----", "------", "-------", "-------"]
         eid = 0
         data = []
-        total_time = sum(time[0] for time in self._time_list)
+        total_time = sum(
+            [
+                np.mean([np.mean(repeat_data) for repeat_data in node_data])
+                for node_data in self._time_list
+            ]
+        )
         for node, time in zip(self._nodes_list, self._time_list):
+            time_mean = np.mean([np.mean(repeat_data) for repeat_data in time])
             num_outputs = self.get_graph_node_output_num(node)
             for j in range(num_outputs):
                 op = node["op"]
@@ -219,11 +230,18 @@ class DebugResult(object):
                     continue
                 name = node["name"]
                 shape = str(self._output_tensor_list[eid].shape)
-                time_us = round(time[0] * 1e6, 3)
-                time_percent = round(((time[0] / total_time) * 100), 3)
+                time_us = round(time_mean * 1e6, 3)
+
+                times = str(
+                    [
+                        [round(number_data * 1e3, 3) for number_data in repeat_data]
+                        for repeat_data in time
+                    ]
+                )
+                time_percent = round(((time_mean / total_time) * 100), 3)
                 inputs = str(node["attrs"]["num_inputs"])
                 outputs = str(node["attrs"]["num_outputs"])
-                node_data = [name, op, time_us, time_percent, shape, inputs, outputs]
+                node_data = [name, op, time_us, time_percent, shape, inputs, outputs, times]
                 data.append(node_data)
                 eid += 1
 
