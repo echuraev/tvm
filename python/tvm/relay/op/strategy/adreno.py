@@ -257,3 +257,17 @@ def schedule_pool_adreno(attrs, outs, target):
         if attrs.layout == "NCHW4c":
             return topi.adreno.schedule_pool(outs, attrs.layout)
         return topi.cuda.schedule_pool(outs, attrs.layout)
+
+
+@schedule_injective.register(["adreno"])
+def schedule_injective_adreno(attrs, outs, target):
+    """schedule injective ops for cuda"""
+    with target:
+        return topi.adreno.schedule_injective(outs)
+
+
+@schedule_concatenate.register(["adreno"])
+def schedule_concatenate_adreno(attrs, outs, target):
+    """schedule concatenate for cuda"""
+    with target:
+        return topi.adreno.schedule_injective(outs)
