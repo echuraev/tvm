@@ -49,14 +49,14 @@ TEST(OpenCLTexturePool, textures_reallocation_optimal_size) {
   EXPECT_EQ(pool.FreeListSize(), 0);
 
   DLDataType type{kDLFloat, 16, 1};
-  void* data1 = pool.Alloc(t->device, workspace, 1024, 768, type);
+  void* data1 = pool.Alloc(t->device, workspace, 1, 1024, 768, type);
   EXPECT_EQ(pool.AllocatedListSize(), 1);
   EXPECT_EQ(pool.FreeListSize(), 0);
   auto item = pool.AllocatedListItemSize(0);
   EXPECT_EQ(item.first, 1024);
   EXPECT_EQ(item.second, 768);
 
-  pool.Alloc(t->device, workspace, 64, 12455, type);
+  pool.Alloc(t->device, workspace, 1, 64, 12455, type);
   EXPECT_EQ(pool.AllocatedListSize(), 2);
   EXPECT_EQ(pool.FreeListSize(), 0);
   item = pool.AllocatedListItemSize(1);
@@ -73,7 +73,7 @@ TEST(OpenCLTexturePool, textures_reallocation_optimal_size) {
   EXPECT_EQ(item.first, 1024);
   EXPECT_EQ(item.second, 768);
 
-  pool.Alloc(t->device, workspace, 768, 1024, type);
+  pool.Alloc(t->device, workspace, 1, 768, 1024, type);
   EXPECT_EQ(pool.AllocatedListSize(), 2);
   EXPECT_EQ(pool.FreeListSize(), 0);
   item = pool.AllocatedListItemSize(0);
@@ -92,7 +92,7 @@ TEST(OpenCLTexturePool, avoid_reusing_too_big_textures) {
   EXPECT_EQ(pool.FreeListSize(), 0);
 
   DLDataType type{kDLFloat, 16, 1};
-  void* data1 = pool.Alloc(t->device, workspace, 12455, 64, type);
+  void* data1 = pool.Alloc(t->device, workspace, 1, 12455, 64, type);
   EXPECT_EQ(pool.AllocatedListSize(), 1);
   EXPECT_EQ(pool.FreeListSize(), 0);
   auto item = pool.AllocatedListItemSize(0);
@@ -106,7 +106,7 @@ TEST(OpenCLTexturePool, avoid_reusing_too_big_textures) {
   EXPECT_EQ(item.first, 12455);
   EXPECT_EQ(item.second, 64);
 
-  pool.Alloc(t->device, workspace, 1024, 768, type);
+  pool.Alloc(t->device, workspace, 1, 1024, 768, type);
   EXPECT_EQ(pool.AllocatedListSize(), 1);
   EXPECT_EQ(pool.FreeListSize(), 1);
   item = pool.FreeListItemSize(0);
@@ -125,7 +125,7 @@ TEST(OpenCLTexturePool, avoid_reusing_too_small_textures) {
   EXPECT_EQ(pool.FreeListSize(), 0);
 
   DLDataType type{kDLFloat, 16, 1};
-  void* data1 = pool.Alloc(t->device, workspace, 1024, 64, type);
+  void* data1 = pool.Alloc(t->device, workspace, 1, 1024, 64, type);
   EXPECT_EQ(pool.AllocatedListSize(), 1);
   EXPECT_EQ(pool.FreeListSize(), 0);
   auto item = pool.AllocatedListItemSize(0);
@@ -139,7 +139,7 @@ TEST(OpenCLTexturePool, avoid_reusing_too_small_textures) {
   EXPECT_EQ(item.first, 1024);
   EXPECT_EQ(item.second, 64);
 
-  pool.Alloc(t->device, workspace, 12544, 64, type);
+  pool.Alloc(t->device, workspace, 1, 12544, 64, type);
   EXPECT_EQ(pool.AllocatedListSize(), 1);
   EXPECT_EQ(pool.FreeListSize(), 1);
   item = pool.FreeListItemSize(0);

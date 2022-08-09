@@ -41,6 +41,12 @@ struct Texture2DShape {
   T channel;
 };
 
+enum class StorageType {
+    Buffer,
+    Texture,
+    TextureArray
+};
+
 /*!
  * \param shape_rank Rank N of the Nd-shape
  * \param convention Storage scope convention to use for flattening
@@ -55,6 +61,10 @@ inline size_t DefaultTextureLayoutSeparator(size_t shape_rank,
   size_t separator = 0;
   if (convention == "global.texture") {
     separator = shape_rank - 2;
+  } else if (convention == "global.texture-array-nchw") {
+    separator = 100;
+  } else if (convention == "global.texture-array-nhwc") {
+    separator = 200;
   } else if (convention == "global.texture-weight") {
     separator = 1;
   } else if (convention == "global.texture-nhwc") {
@@ -77,6 +87,22 @@ inline size_t DefaultTextureLayoutSeparator(size_t shape_rank,
  */
 template <typename T, typename S>
 Texture2DShape<T> ApplyTexture2DFlattening(const S& shape, size_t rank, size_t axis) {
+  if (axis == 100) {
+    ICHECK(rank == 5)
+        << "Number of axes to flatten into rows must be less than shape rank for 2d flattening";
+    T width = shape[3];
+    T height = shape[2];
+    T channel = shape[1] * shape[0];
+    return Texture2DShape<T>{width, height, channel};
+  } else if (axis == 200) {
+    ICHECK(rank == 5)
+        << "Number of axes to flatten into rows must be less than shape rank for 2d flattening";
+    T width = shape[2];
+    T height = shape[1];
+    //T channel = shape[rank - 1] * shape[3] * shape[0];
+    T channel = shape[3] * shape[0];
+    return Texture2DShape<T>{width, height, channel};
+  }
   ICHECK(axis < rank)
       << "Number of axes to flatten into rows must be less than shape rank for 2d flattening";
   Texture2DShape<T> texture{1, 1, shape[rank - 1]};
@@ -90,14 +116,19 @@ Texture2DShape<T> ApplyTexture2DFlattening(const S& shape, size_t rank, size_t a
   return texture;
 }
 
-inline bool IsTextureStorage(std::string scope) {
-  return scope.find("texture") != std::string::npos;
+inline StorageType GetStorageType(std::string scope) {
+  if (scope.find("texture-array") != std::string::npos) {
+      return StorageType::TextureArray;
+  } else if (scope.find("texture") != std::string::npos) {
+      return StorageType::Texture;
+  }
+  return StorageType::Buffer;
 }
 
 class TVM_DLL Pool2D {
  public:
   Pool2D() = default;
-  void* Alloc(Device dev, DeviceAPI* device, size_t width, size_t height, DLDataType type_hint);
+  void* Alloc(Device dev, DeviceAPI* device, size_t array_size, size_t width, size_t height, DLDataType type_hint);
   void Free(void* data);
   // Release all resources immediately
   void Release(Device dev, DeviceAPI* device);
@@ -107,6 +138,7 @@ class TVM_DLL Pool2D {
     void* data;
     size_t x;
     size_t y;
+    size_t z;
     DLDataType type;
   };
   std::vector<Entry> free_list_;
@@ -145,7 +177,7 @@ class TVM_DLL TexturePool {
    * \param height The height of the 2d texture to be allocated.
    * \param type_hint The type of elements.
    */
-  void* AllocTexture(Device dev, size_t width, size_t height, DLDataType type_hint);
+  void* AllocTexture(Device dev, size_t array_size, size_t width, size_t height, DLDataType type_hint);
   /*!
    * \brief Free temporal texture in backend execution.
    *

@@ -29,7 +29,7 @@
 namespace tvm {
 namespace runtime {
 
-void* Pool2D::Alloc(Device dev, DeviceAPI* device, size_t width, size_t height,
+void* Pool2D::Alloc(Device dev, DeviceAPI* device, size_t array_size, size_t width, size_t height,
                     DLDataType type_hint) {
   Entry e;
   Entry new_mem;
@@ -43,50 +43,61 @@ void* Pool2D::Alloc(Device dev, DeviceAPI* device, size_t width, size_t height,
   if (free_list_.size() != 0) {
     int64_t min_added_size_x = std::numeric_limits<int64_t>::max();
     int64_t min_added_size_y = std::numeric_limits<int64_t>::max();
+    int64_t min_added_size_z = std::numeric_limits<int64_t>::max();
     int64_t min_wasted_size_x = std::numeric_limits<int64_t>::max();
     int64_t min_wasted_size_y = std::numeric_limits<int64_t>::max();
+    int64_t min_wasted_size_z = std::numeric_limits<int64_t>::max();
     for (auto it = free_list_.begin(); it != free_list_.end(); ++it) {
       if (it->type.code != type_hint.code) {
         continue;
       }
       // avoid reusing too small and too big textures
       if (width / it->x > max_ratio || it->x / width > max_ratio || height / it->y > max_ratio ||
-          it->y / height > max_ratio) {
+          it->y / height > max_ratio || array_size / it->z > max_ratio || it->z / array_size > max_ratio) {
         continue;
       }
       int64_t new_width = std::max(it->x, width);
       int64_t new_height = std::max(it->y, height);
+      int64_t new_array_size = std::max(it->z, array_size);
       int64_t added_size_x = new_width - it->x;
       int64_t added_size_y = new_height - it->y;
+      int64_t added_size_z = new_array_size - it->z;
       int64_t wasted_size_x = new_width - width;
       int64_t wasted_size_y = new_height - height;
+      int64_t wasted_size_z = new_array_size - array_size;
       // Minimize added size first and wasted size thereafter
       if ((min_added_size_x > 0 && added_size_x < min_added_size_x) ||
           (min_added_size_y > 0 && added_size_y < min_added_size_y) ||
+          (min_added_size_z > 0 && added_size_z < min_added_size_z) ||
           (min_added_size_x == added_size_x && wasted_size_x < min_wasted_size_x) ||
-          (min_added_size_y == added_size_y && wasted_size_y < min_wasted_size_y)) {
+          (min_added_size_y == added_size_y && wasted_size_y < min_wasted_size_y) ||
+          (min_added_size_z == added_size_z && wasted_size_z < min_wasted_size_z)) {
         min_added_size_x = added_size_x;
         min_added_size_y = added_size_y;
+        min_added_size_z = added_size_z;
         min_wasted_size_x = wasted_size_x;
         min_wasted_size_y = wasted_size_y;
+        min_wasted_size_z = wasted_size_z;
         best_mem = it;
         new_mem.x = new_width;
         new_mem.y = new_height;
+        new_mem.z = new_array_size;
       }
     }
 
-    if (min_added_size_x == 0 && min_added_size_y == 0) {
+    if (min_added_size_x == 0 && min_added_size_y == 0 && min_added_size_z == 0) {
       // use existing block
       e = *best_mem;
       free_list_.erase(best_mem);
     } else if (static_cast<size_t>(min_added_size_x) <= width ||
-               static_cast<size_t>(min_added_size_y) <= height) {
+               static_cast<size_t>(min_added_size_y) <= height ||
+               static_cast<size_t>(min_added_size_z) <= array_size) {
       // if added size is less or equal to
       // what is needed by alloc, then grow entry
       device->FreeDataSpace(dev, best_mem->data);
       free_list_.erase(best_mem);
       new_mem.type = type_hint;
-      std::vector<int64_t> shape{int64_t(new_mem.y), int64_t(new_mem.x), 4};
+      std::vector<int64_t> shape{int64_t(new_mem.y), int64_t(new_mem.x), int64_t(new_mem.z)};
       new_mem.data = device->AllocDataSpace(dev, shape.size(), shape.data(), new_mem.type,
                                             Optional<String>("global.texture"));
       e = new_mem;
@@ -95,11 +106,12 @@ void* Pool2D::Alloc(Device dev, DeviceAPI* device, size_t width, size_t height,
 
   if (e.data == nullptr) {
     // create new block
-    std::vector<int64_t> shape{int64_t(height), int64_t(width), 4};
+    std::vector<int64_t> shape{int64_t(height), int64_t(width), int64_t(array_size)};
     e.data = device->AllocDataSpace(dev, shape.size(), shape.data(), type_hint,
                                     Optional<String>("global.texture"));
     e.x = width;
     e.y = height;
+    e.z = array_size;
     e.type = type_hint;
   }
 
@@ -151,14 +163,14 @@ TexturePool::~TexturePool() {
   }
 }
 
-void* TexturePool::AllocTexture(Device dev, size_t width, size_t height, DLDataType type_hint) {
+void* TexturePool::AllocTexture(Device dev, size_t array_size, size_t width, size_t height, DLDataType type_hint) {
   if (static_cast<size_t>(dev.device_id) >= array_.size()) {
     array_.resize(dev.device_id + 1, nullptr);
   }
   if (array_[dev.device_id] == nullptr) {
     array_[dev.device_id] = new Pool2D();
   }
-  return array_[dev.device_id]->Alloc(dev, device_, width, height, type_hint);
+  return array_[dev.device_id]->Alloc(dev, device_, array_size, width, height, type_hint);
 }
 
 void TexturePool::FreeTexture(Device dev, void* ptr) {

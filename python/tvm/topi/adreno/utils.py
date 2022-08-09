@@ -541,6 +541,15 @@ def get_texture_storage(shape):
     # define it uniformly for all target devices
     # limit = 16384
     limit = tvm.target.Target.current().attrs["texture_spatial_limit"]
+    array_limit = tvm.target.Target.current().attrs["texture_array_limit"]
+    if shape[1] == shape[2]:
+        N, C = shape[0], shape[3]
+        if N * C < array_limit:
+            return "global.texture-array-nhwc"
+    elif shape[2] == shape[3]:
+        N, C = shape[0], shape[1]
+        if N * C < array_limit:
+            return "global.texture-array-nchw"
 
     if shape[0] * shape[1] * shape[2] < limit and shape[3] < limit:
         return "global.texture"

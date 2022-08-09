@@ -52,7 +52,10 @@ inline size_t GetDataAlignment(const DLTensor& arr) {
   if (align < kAllocAlignment) return kAllocAlignment;
   return align;
 }
-constexpr auto Is2DStorage = IsTextureStorage;
+inline bool Is2DStorage(std::string scope) {
+    auto storage_scope = GetStorageType(scope);
+    return storage_scope == StorageType::Texture || storage_scope == StorageType::TextureArray;
+}
 }  // namespace details
 
 /*!

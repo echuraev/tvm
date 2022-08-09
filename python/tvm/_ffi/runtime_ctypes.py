@@ -444,6 +444,17 @@ class Device(ctypes.Structure):
         """
         return self._GetDeviceAttr(self.device_type, self.device_id, 12)
 
+    def texture_array_limit(self):
+        """Returns limits for textures array
+
+        Returns
+        -------
+        limit : int or None
+            Maximum number of elements in the texture array
+
+        """
+        return self._GetDeviceAttr(self.device_type, self.device_id, 12)
+
     def create_raw_stream(self):
         """Create a new runtime stream at the context.
 

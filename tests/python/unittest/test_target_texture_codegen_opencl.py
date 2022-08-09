@@ -279,6 +279,47 @@ def schedule_matmul_vector_accumulator(A, B, C, local=False):
     return s
 
 
+def compute_array_simple_test(input_shape, bias_shape):
+    # input: [N, C, H, W, c] , [N*C*H*W*c]
+    data = te.placeholder(input_shape, name="data", dtype="float32")
+    bias = te.placeholder(bias_shape, name="bias", dtype="float32")
+    N, C, H, W, CB = input_shape
+    comp = te.compute(
+        (N, C, H, W, CB),
+        lambda n, c, h, w, cb: data[n, c, h, w, cb].astype("float32")
+            + bias[n * C * H * W * CB + c * H * W * CB + h * W * CB + w * CB + cb].astype("float32"),
+        name="simple_compute",
+    )
+    return data, bias, comp
+
+
+def schedule_array_simple_test(data, bias, comp):
+    # inputs: (1, 128//4, 56, 56, 4), (1, 1, 128, 128//4, 4)
+    # outputs:
+    s = te.create_schedule(comp.op)
+    A, _, C = data, bias, comp
+    At = s.cache_read(A, "global.texture-array-nchw", [C])
+
+    def copy_to_texture(stage):
+        axes = s[stage].op.axis
+        fused = s[stage].fuse(*axes[:-1])
+        block, thread = s[stage].split(fused, factor=32)
+        s[stage].vectorize(axes[-1])
+        s[stage].bind(block, te.thread_axis("blockIdx.x"))
+        s[stage].bind(thread, te.thread_axis("threadIdx.x"))
+
+    copy_to_texture(At)
+
+    _n, _c, _h, _w, _cb = s[C].op.axis
+    fused = s[C].fuse(_n, _c, _h, _w)
+    s[C].vectorize(_cb)
+    bx, tx = s[C].split(fused, 128)
+    s[C].bind(bx, te.thread_axis("blockIdx.x"))
+    s[C].bind(tx, te.thread_axis("threadIdx.x"))
+
+    return s
+
+
 def compute_conv2d_1x1_NCHWc_RSCKk(input_shape, filter_shape):
     # conv2d( [N, C, H, W, c] , [1, 1, C, K, k]
     data = te.placeholder(input_shape, name="data", dtype="float32")
@@ -1080,6 +1121,12 @@ def scheduler(compute, schedule, *args, **kwargs):
     return s, placeholders
 
 
+def texture_array_simple_test(input_shape, filter_shape):
+    placeholders = compute_array_simple_test(input_shape, filter_shape)
+    s = schedule_array_simple_test(*placeholders)
+    return s, placeholders
+
+
 def conv2d_1x1_NCHWc_RSCKk(input_shape, filter_shape):
     placeholders = compute_conv2d_1x1_NCHWc_RSCKk(input_shape, filter_shape)
     s = schedule_conv2d_1x1_NCHWc_RSCKk(*placeholders)
@@ -1198,6 +1245,16 @@ def validate(workload, target, dev, input_shapes, *args, **kwargs):
                 args_np[0].transpose((0, 2, 1)).reshape(128, 64),
                 args_np[1].transpose(1, 0, 2).reshape(64, 128),
             )
+    elif "texture_array_simple_test" in workload.__name__:
+        N, C, H, W, CB = args_np[0].shape
+        np_result = np.zeros(args_np[0].shape, dtype="float32")
+        for n in range(N):
+            for c in range(C):
+                for h in range(H):
+                    for w in range(W):
+                        for cb in range(CB):
+                            idx = n * C * H * W * CB + c * H * W * CB + h * W * CB + w * CB + cb
+                            np_result[n][c][h][w][cb] = args_np[0][n][c][h][w][cb] + args_np[1][idx]
     elif "conv2d_1x1_NCHWc_RSCKk" in workload.__name__:
         vec_length = args_np[1].shape[-1]
         # nchwc -> nchw
@@ -1396,6 +1453,12 @@ class TestDepthwiseConv2dNCHWcKCRSk(BaseConv2DValidator):
     input_shapes = tvm.testing.parameter([(1, 24, 257, 257, 4), (24, 1, 3, 3, 4)])
     test_func = tvm.testing.parameter(depthwise_conv2d_NCHWc_KCRSk_acc32)
 
+
+class TestConv2dTextureArray(BaseConv2DValidator):
+    shape1 = (1, 3, 5, 5, 4)
+    shape2 = (shape1[0] * shape1[1] * shape1[2] * shape1[3] * shape1[4],)
+    input_shapes = tvm.testing.parameter([shape1, shape2])
+    test_func = tvm.testing.parameter(texture_array_simple_test)
 
 if __name__ == "__main__":
     tvm.testing.main()

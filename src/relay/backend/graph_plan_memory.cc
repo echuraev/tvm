@@ -44,7 +44,10 @@ namespace relay {
 
 using TargetsMap = Map<Integer, Target>;
 using Texture2DShape = runtime::Texture2DShape<int64_t>;
-constexpr auto Is2DStorage = runtime::IsTextureStorage;
+inline bool Is2DStorage(std::string scope) {
+    auto storage_scope = runtime::GetStorageType(scope);
+    return storage_scope == runtime::StorageType::Texture || storage_scope == runtime::StorageType::TextureArray;
+}
 
 using backend::StaticMemoryPlan;
 using backend::StorageInfo;

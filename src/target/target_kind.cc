@@ -336,6 +336,7 @@ TVM_REGISTER_TARGET_KIND("opencl", kDLOpenCL)
     .add_attr_option<Integer>("max_num_threads", Integer(256))
     .add_attr_option<Integer>("thread_warp_size", Integer(1))
     .add_attr_option<Integer>("texture_spatial_limit", Integer(16384))
+    .add_attr_option<Integer>("texture_array_limit", Integer(2048))
     .set_default_keys({"opencl", "gpu"});
 
 // The metal has some limitations on the number of input parameters. This is why attribute

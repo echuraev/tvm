@@ -196,10 +196,15 @@ class StorageInfo : private transform::DeviceAwareExprVisitor {
       std::map<int, std::string> diffs;
       int limit =
           vd->target->GetAttr<Integer>("texture_spatial_limit").value_or(Integer(16384))->value;
+      int array_limit =
+          vd->target->GetAttr<Integer>("texture_array_limit").value_or(Integer(2048))->value;
       int a0 = shape[0].as<IntImmNode>()->value;
       int a1 = shape[1].as<IntImmNode>()->value;
       int a2 = shape[2].as<IntImmNode>()->value;
       int a3 = shape[3].as<IntImmNode>()->value;
+
+      if (a1 == a2 && a0 * a3 < array_limit) return "texture-array-nhwc";
+      if (a2 == a3 && a0 * a1 < array_limit) return "texture-array-nchw";
 
       int d3l = a0 * a1 * a2;
       int d3r = a3;

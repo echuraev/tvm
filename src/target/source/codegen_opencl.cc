@@ -77,7 +77,7 @@ void CodeGenOpenCL::InitFuncState(const PrimFunc& f) {
   this->SetTextureScope(InferTextureAccess().Infer(f->body));
   for (Var arg : f->params) {
     auto ptr_type = arg->type_annotation.as<PointerTypeNode>();
-    if (ptr_type && runtime::IsTextureStorage(std::string(ptr_type->storage_scope))) {
+    if (ptr_type && (runtime::GetStorageType(std::string(ptr_type->storage_scope)) == runtime::StorageType::Texture || runtime::GetStorageType(std::string(ptr_type->storage_scope)) == runtime::StorageType::TextureArray)) {
       // Storage scope qualifiers for textures are inferred
       // and set prior to function codegen.
       continue;
@@ -247,8 +247,10 @@ void CodeGenOpenCL::PrintType(const Type& type, std::ostream& os) {  // NOLINT(*
   if (auto* ptr = type.as<PrimTypeNode>()) {
     return PrintType(ptr->dtype, os);
   } else if (auto* ptr = type.as<PointerTypeNode>()) {
-    if (runtime::IsTextureStorage(std::string(ptr->storage_scope))) {
+    if (runtime::GetStorageType(std::string(ptr->storage_scope)) == runtime::StorageType::Texture) {
       os << "image2d_t";
+    } else if (runtime::GetStorageType(std::string(ptr->storage_scope)) == runtime::StorageType::TextureArray) {
+      os << "image2d_array_t";
     } else {
       PrintType(ptr->element_type, os);
       os << '*';
@@ -319,7 +321,7 @@ void CodeGenOpenCL::PrintStorageScope(const std::string& scope, std::ostream& os
 void CodeGenOpenCL::PrintRestrict(const Var& v, std::ostream& os) {
   // Apply restrict qualifer for non-texture types only
   if (auto* ptr = v->type_annotation.as<PointerTypeNode>()) {
-    if (!runtime::IsTextureStorage(std::string(ptr->storage_scope))) {
+    if (runtime::GetStorageType(std::string(ptr->storage_scope)) == runtime::StorageType::Buffer) {
       os << ' ' << restrict_keyword_;
     }
   }
@@ -399,7 +401,8 @@ void CodeGenOpenCL::VisitExpr_(const CallNode* op, std::ostream& os) {
   } else if (op->op.same_as(builtin::texture2d_store())) {
     auto* ptr_type = op->args[0].as<VarNode>()->type_annotation.as<PointerTypeNode>();
     ICHECK(ptr_type != nullptr) << "Texture Var's must be of PointerType";
-    ICHECK(runtime::IsTextureStorage(std::string(ptr_type->storage_scope)))
+    auto storage_type = runtime::GetStorageType(std::string(ptr_type->storage_scope));
+    ICHECK(storage_type == runtime::StorageType::Texture || storage_type == runtime::StorageType::TextureArray)
         << "builtin::texture2d_store() only supports storing to texture buffers";
     DataType buffer_type = ptr_type->element_type.as<PrimTypeNode>()->dtype;
     if (buffer_type.is_float16()) {
@@ -410,17 +413,33 @@ void CodeGenOpenCL::VisitExpr_(const CallNode* op, std::ostream& os) {
       LOG(FATAL) << "Unsupported type: " << buffer_type
                  << ", currently only float and half are supported for image2d OpenCL codegen.";
     }
-    this->PrintExpr(op->args[0], os);
+    int idx = 0;
+    this->PrintExpr(op->args[idx++], os);
     os << ", ";
-    os << "(int2)(";
-    this->PrintExpr(op->args[1], os);
-    os << ", ";
-    this->PrintExpr(op->args[2], os);
-    os << "), ";
-    this->PrintExpr(op->args[3], os);
+    if (storage_type == runtime::StorageType::Texture) {
+      os << "(int2)(";
+      this->PrintExpr(op->args[idx++], os);
+      os << ", ";
+      this->PrintExpr(op->args[idx++], os);
+      os << "), ";
+    } else {
+      ICHECK(op->args.size() == 5) << "Wrong number of arguments: " << op->args.size();
+      os << "(int4)(";
+      this->PrintExpr(op->args[idx++], os);
+      os << ", ";
+      this->PrintExpr(op->args[idx++], os);
+      os << ", ";
+      this->PrintExpr(op->args[idx++], os);
+      os << ", 0), ";
+    }
+    this->PrintExpr(op->args[idx++], os);
     os << ")";
   } else if (op->op.same_as(builtin::texture2d_load())) {
     enable_compliant_texture_reads_ = true;
+    auto* ptr_type = op->args[0].as<VarNode>()->type_annotation.as<PointerTypeNode>();
+    auto storage_type = runtime::GetStorageType(std::string(ptr_type->storage_scope));
+    ICHECK(storage_type == runtime::StorageType::Texture || storage_type == runtime::StorageType::TextureArray)
+        << "builtin::texture2d_store() only supports storing to texture buffers";
     std::stringstream ss;
     if (op->dtype.is_float16()) {
       ss << "READ_IMAGEH(";
@@ -430,14 +449,26 @@ void CodeGenOpenCL::VisitExpr_(const CallNode* op, std::ostream& os) {
       LOG(FATAL) << "Unsupported type: " << op->dtype
                  << ", currently only float and half are supported for image2d OpenCL codegen.";
     }
-    this->PrintExpr(op->args[0], ss);
+    int idx = 0;
+    this->PrintExpr(op->args[idx++], ss);
     ss << ", ";
     ss << "CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST, ";
-    ss << "((int2)(";
-    this->PrintExpr(op->args[1], ss);
-    ss << ", ";
-    this->PrintExpr(op->args[2], ss);
-    ss << ")))";
+    if (storage_type == runtime::StorageType::Texture) {
+      ss << "((int2)(";
+      this->PrintExpr(op->args[idx++], ss);
+      ss << ", ";
+      this->PrintExpr(op->args[idx++], ss);
+      ss << ")))";
+    } else {
+      ICHECK(op->args.size() == 5) << "Wrong number of arguments";
+      ss << "((int4)(";
+      this->PrintExpr(op->args[idx++], ss);
+      ss << ", ";
+      this->PrintExpr(op->args[idx++], ss);
+      ss << ", ";
+      this->PrintExpr(op->args[idx++], ss);
+      ss << ", 0)))";
+    }
 
     // Only use local SSA if texture is not already being stored
     if (need_texture_ssa_) {

@@ -41,7 +41,7 @@ namespace tir {
 using arith::IRVisitorWithAnalyzer;
 using runtime::ApplyTexture2DFlattening;
 using runtime::DefaultTextureLayoutSeparator;
-using runtime::IsTextureStorage;
+using runtime::GetStorageType;
 
 class TextureLoweringBase : public StmtExprMutator {
  public:
@@ -102,7 +102,7 @@ class TextureFlattener : public TextureLoweringBase {
     op = stmt.as<BufferRealizeNode>();
 
     // Rewrite any buffer realizations with storage scope to 2d texture allocations
-    if (IsTextureStorage(storage_scope)) {
+    if (GetStorageType(storage_scope) == runtime::StorageType::Texture || GetStorageType(storage_scope) == runtime::StorageType::TextureArray) {
       Stmt body = this->VisitStmt(op->body);
       ICHECK(op->bounds.size() >= 3) << "Only 2d RGBA texture is currently supported";
       int vec_length = static_cast<int>(op->bounds.back()->extent.as<IntImmNode>()->value);
@@ -118,9 +118,9 @@ class TextureFlattener : public TextureLoweringBase {
           ApplyTexture2DFlattening<PrimExpr>(ShapeFromRange{op->bounds}, op->bounds.size(), axis);
       Array<PrimExpr> args;
       args.push_back(StringImm(storage_scope));
-      args.push_back(IntImm(DataType::Int(64), 2));  // 2d
+      args.push_back(IntImm(DataType::Int(64), 3));  // 3d
       args.push_back(Call(DataType::Handle(), builtin::tvm_stack_make_shape(),
-                          {texture.width, texture.height}));
+                          {texture.width, texture.height, texture.channel}));
       stmt = LetStmt(buffer_var, Call(buffer_var.dtype(), builtin::nd_mem_alloc_with_scope(), args),
                      body);
     }
@@ -132,8 +132,8 @@ class TextureFlattener : public TextureLoweringBase {
     Stmt stmt = StmtExprMutator::VisitStmt_(op);
     op = stmt.as<BufferStoreNode>();
     std::string storage_scope = GetStorageScope(op->buffer);
-    // Lower to two dimensional access
-    if (IsTextureStorage(storage_scope)) {
+    // Lower to two or three dimensional access
+    if (GetStorageType(storage_scope) == runtime::StorageType::Texture || GetStorageType(storage_scope) == runtime::StorageType::TextureArray) {
       Array<PrimExpr> args = GetTextureAccessArgs(op, op->buffer);
       args.push_back(op->value);
       stmt = Evaluate(Call(args[0]->dtype, builtin::texture2d_store(), args));
@@ -145,9 +145,9 @@ class TextureFlattener : public TextureLoweringBase {
   PrimExpr VisitExpr_(const BufferLoadNode* op) final {
     PrimExpr expr = StmtExprMutator::VisitExpr_(op);
     op = expr.as<BufferLoadNode>();
-    // Lower to two dimensional access
+    // Lower to two or three dimensional access
     std::string storage_scope = GetStorageScope(op->buffer);
-    if (IsTextureStorage(storage_scope)) {
+    if (GetStorageType(storage_scope) == runtime::StorageType::Texture || GetStorageType(storage_scope) == runtime::StorageType::TextureArray) {
       Array<PrimExpr> args = GetTextureAccessArgs(op, op->buffer);
       args.push_back(op->indices.back());
       expr = Call(op->buffer->dtype, builtin::texture2d_load(), args);
@@ -160,25 +160,57 @@ class TextureFlattener : public TextureLoweringBase {
   template <typename T>
   Array<PrimExpr> GetTextureAccessArgs(const T* op, const Buffer& buffer) {
     Array<PrimExpr> args;
+    std::string storage_scope = GetStorageScope(buffer);
     if (let_binding_.count(op->buffer->data)) {
       args.push_back(let_binding_[op->buffer->data]);
     } else {
       args.push_back(buffer->data);
     }
-    Array<PrimExpr> row_dims, row_indices, col_dims, col_indices;
-    for (size_t i = 0; i < op->buffer->shape.size() - 1; i++) {
-      if (i < DefaultTextureLayoutSeparator(op->buffer->shape.size(), GetStorageScope(buffer))) {
-        col_dims.push_back(op->buffer->shape[i]);
-        col_indices.push_back(op->indices[i]);
+    if (GetStorageType(storage_scope) == runtime::StorageType::TextureArray) {
+      int idx_n, idx_h, idx_w, idx_c;
+      idx_n = 0;
+      Array<PrimExpr> row_dims, row_indices, col_dims, col_indices, n_dims, n_indices;
+      if (DefaultTextureLayoutSeparator(op->buffer->shape.size(), GetStorageScope(buffer)) == 100) {
+          idx_c = 1;
+          idx_h = 2;
+          idx_w = 3;
+      } else if (DefaultTextureLayoutSeparator(op->buffer->shape.size(), GetStorageScope(buffer)) == 200) {
+          idx_h = 1;
+          idx_w = 2;
+          idx_c = 3;
       } else {
-        row_dims.push_back(op->buffer->shape[i]);
-        row_indices.push_back(op->indices[i]);
+        LOG(FATAL) << "Something wrong";
       }
+      row_dims.push_back(op->buffer->shape[idx_h]);
+      row_indices.push_back(op->indices[idx_h]);
+      col_dims.push_back(op->buffer->shape[idx_w]);
+      col_indices.push_back(op->indices[idx_w]);
+      n_dims.push_back(op->buffer->shape[idx_n]);
+      n_indices.push_back(op->indices[idx_n]);
+      n_dims.push_back(op->buffer->shape[idx_c]);
+      n_indices.push_back(op->indices[idx_c]);
+      PrimExpr row_offset = SimplifyOffset(row_dims, row_indices);
+      PrimExpr col_offset = SimplifyOffset(col_dims, col_indices);
+      PrimExpr n_offset = SimplifyOffset(n_dims, n_indices);
+      args.push_back(row_offset);
+      args.push_back(col_offset);
+      args.push_back(n_offset);
+    } else {
+      Array<PrimExpr> row_dims, row_indices, col_dims, col_indices;
+      for (size_t i = 0; i < op->buffer->shape.size() - 1; i++) {
+        if (i < DefaultTextureLayoutSeparator(op->buffer->shape.size(), GetStorageScope(buffer))) {
+          col_dims.push_back(op->buffer->shape[i]);
+          col_indices.push_back(op->indices[i]);
+        } else {
+          row_dims.push_back(op->buffer->shape[i]);
+          row_indices.push_back(op->indices[i]);
+        }
+      }
+      PrimExpr row_offset = SimplifyOffset(row_dims, row_indices);
+      PrimExpr col_offset = SimplifyOffset(col_dims, col_indices);
+      args.push_back(row_offset);
+      args.push_back(col_offset);
     }
-    PrimExpr row_offset = SimplifyOffset(row_dims, row_indices);
-    PrimExpr col_offset = SimplifyOffset(col_dims, col_indices);
-    args.push_back(row_offset);
-    args.push_back(col_offset);
     return args;
   }
 

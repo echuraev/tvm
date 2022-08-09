@@ -336,8 +336,14 @@ class Vectorizer : public StmtMutator, public ExprFunctor<PrimExpr(const PrimExp
       // Vectorize the value to store
       Array<PrimExpr> value{op->args.back()};
       Array<PrimExpr> mutated_value = MutateArray(value, &lane);
-      Array<PrimExpr> new_args{op->args[0], op->args[1], op->args[2], mutated_value[0]};
-      return Call(op->dtype.with_lanes(lane), op->op, new_args);
+      if (op->args.size() == 5) {  // texture_array
+        Array<PrimExpr> new_args{op->args[0], op->args[1], op->args[2], op->args[3],
+                                 mutated_value[0]};
+        return Call(op->dtype.with_lanes(lane), op->op, new_args);
+      } else {
+        Array<PrimExpr> new_args{op->args[0], op->args[1], op->args[2], mutated_value[0]};
+        return Call(op->dtype.with_lanes(lane), op->op, new_args);
+      }
     }
     auto* op_ptr = op->op.as<OpNode>();
     bool vectorizable = op_ptr && op_vectorizable_.get(GetRef<Op>(op_ptr), false);

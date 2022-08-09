@@ -297,8 +297,8 @@ class OpenCLWorkspace : public DeviceAPI {
   void FreeWorkspace(Device dev, void* data) final;
 
   // Texture (image2d_t) alloca APIs
-  cl_mem AllocTexture(Device dev, size_t width, size_t height, DLDataType type_hint);
-  void* AllocTextureWorkspace(Device dev, size_t width, size_t height, DLDataType type_hint);
+  cl_mem AllocTexture(Device dev, size_t array_size, size_t width, size_t height, DLDataType type_hint);
+  void* AllocTextureWorkspace(Device dev, size_t array_size, size_t width, size_t height, DLDataType type_hint);
   void FreeTextureWorkspace(Device dev, void* data);
 
   /*!
@@ -364,6 +364,14 @@ struct BufferDescriptor {
      *         e.g. image2d[height=NH, width=WC]
      */
     kImage2DNHWC,
+    /*! \brief Array of two dimensional texture
+     *          e.g. image2d_array[NC][height=H, width=W]
+     */
+    kImage2DArrayNCHW,
+    /*! \brief Array of two dimensional texture
+     *          e.g. image2d_array[NC][height=H, width=W]
+     */
+    kImage2DArrayNHWC,
   };
   BufferDescriptor() = default;
   explicit BufferDescriptor(Optional<String> scope) : layout(MemoryLayoutFromScope(scope)) {}
