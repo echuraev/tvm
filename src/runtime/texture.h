@@ -39,6 +39,7 @@ struct Texture2DShape {
   T width;
   T height;
   T channel;
+  T array_dim;
 };
 
 enum class StorageType {
@@ -65,6 +66,8 @@ inline size_t DefaultTextureLayoutSeparator(size_t shape_rank,
     separator = 100;
   } else if (convention == "global.texture-array-nhwc") {
     separator = 200;
+  } else if (convention == "global.texture-array-hwoi") {
+    separator = 300;
   } else if (convention == "global.texture-weight") {
     separator = 1;
   } else if (convention == "global.texture-nhwc") {
@@ -88,24 +91,58 @@ inline size_t DefaultTextureLayoutSeparator(size_t shape_rank,
 template <typename T, typename S>
 Texture2DShape<T> ApplyTexture2DFlattening(const S& shape, size_t rank, size_t axis) {
   if (axis == 100) {
-    ICHECK(rank == 5)
-        << "Number of axes to flatten into rows must be less than shape rank for 2d flattening";
-    T width = shape[3];
-    T height = shape[2];
-    T channel = shape[1] * shape[0];
-    return Texture2DShape<T>{width, height, channel};
+    static int counter = 0;
+    counter++;
+    std::cout << counter << ". Number of axes to flatten into rows must be less than shape rank for 2d flattening, rank: " << rank << ", shape: ";
+    for (int i = 0; i < rank; ++i) {
+        std::cout << shape[i] << ", ";
+    }
+    std::cout << std::endl;
+    //ICHECK(rank == 5)
+    //    << counter << ". Number of axes to flatten into rows must be less than shape rank for 2d flattening, rank: " << rank;
+    T width, height, channel, array_dim;
+    if (rank == 4) {
+        array_dim = shape[0];
+        height = shape[1];
+        width = shape[2];
+        channel = shape[3];
+    } else if (rank == 3) {
+        height = shape[0];
+        width = shape[1];
+        array_dim = shape[2];
+        channel = 4;
+    } else {
+        ICHECK(rank == 5)
+            << counter << ". Number of axes to flatten into rows must be less than shape rank for 2d flattening, rank: " << rank;
+        width = shape[3];
+        height = shape[2];
+        channel = shape[4];
+        array_dim = shape[1] * shape[0];
+    }
+    std::cout << "Axis 100: w: " << width << ", h: " << height << ", c: " << channel << ", array_dim: " << array_dim << std::endl;
+    return Texture2DShape<T>{width, height, channel, array_dim};
   } else if (axis == 200) {
     ICHECK(rank == 5)
         << "Number of axes to flatten into rows must be less than shape rank for 2d flattening";
     T width = shape[2];
     T height = shape[1];
-    //T channel = shape[rank - 1] * shape[3] * shape[0];
-    T channel = shape[3] * shape[0];
-    return Texture2DShape<T>{width, height, channel};
+    T channel = shape[4];
+    T array_dim = shape[3] * shape[0];
+    std::cout << "Axis 200: w: " << width << ", h: " << height << ", c: " << channel << std::endl;
+    return Texture2DShape<T>{width, height, channel, array_dim};
+  } else if (axis == 300) {
+    ICHECK(rank == 5)
+        << "Number of axes to flatten into rows must be less than shape rank for 2d flattening";
+    T width = shape[1];
+    T height = shape[0];
+    T channel = shape[4];
+    T array_dim = shape[2] * shape[3];
+    std::cout << "Axis 300: w: " << width << ", h: " << height << ", c: " << channel << std::endl;
+    return Texture2DShape<T>{width, height, channel, array_dim};
   }
   ICHECK(axis < rank)
       << "Number of axes to flatten into rows must be less than shape rank for 2d flattening";
-  Texture2DShape<T> texture{1, 1, shape[rank - 1]};
+  Texture2DShape<T> texture{1, 1, shape[rank - 1], 1};
   for (size_t i = 0; i < rank - 1; i++) {
     if (i < axis) {
       texture.height *= shape[i];

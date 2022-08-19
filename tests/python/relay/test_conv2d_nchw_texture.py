@@ -1056,3 +1056,39 @@ def test_conv2d_different_lowering_same_op():
     ]
 
     build_run_compare(mod, params1, {"data": input_shape}, dtype, target, static_memory_scope)
+
+
+@tvm.testing.requires_opencl
+def test_conv2d_array():
+    target = "opencl --device=adreno"
+    dtype = "float32"
+    ich = 8
+    och = 16
+    input_shape = (1, ich, 1, 1)
+    filter_shape = (och, ich, 3, 3)
+    A = relay.var("data", shape=input_shape, dtype=dtype)
+    B = relay.var("weight", shape=filter_shape, dtype=dtype)
+
+    D = relay.nn.conv2d(
+        A,
+        B,
+        data_layout="NCHW",
+        kernel_layout="OIHW",
+        padding=[1, 1, 1, 1],
+        channels=och,
+        kernel_size=[filter_shape[2], filter_shape[3]],
+        out_dtype=dtype,
+    )
+
+    mod = relay.Function([A, B], D)
+    np.random.seed(0)
+    initializer = relay.testing.init.Xavier()
+    filter_data = np.zeros(filter_shape).astype(dtype)
+    initializer("weight", filter_data)
+    params1 = {
+        "weight": tvm.nd.array(filter_data),
+    }
+
+    build_run_compare(
+        mod, params1, {"data": input_shape}, dtype, target, []
+    )

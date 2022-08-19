@@ -372,6 +372,10 @@ struct BufferDescriptor {
      *          e.g. image2d_array[NC][height=H, width=W]
      */
     kImage2DArrayNHWC,
+    /*! \brief Array of two dimensional texture
+     *          e.g. image2d_array[OI][height=H, width=W]
+     */
+    kImage2DArrayHWOI,
   };
   BufferDescriptor() = default;
   explicit BufferDescriptor(Optional<String> scope) : layout(MemoryLayoutFromScope(scope)) {}

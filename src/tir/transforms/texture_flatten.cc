@@ -120,7 +120,7 @@ class TextureFlattener : public TextureLoweringBase {
       args.push_back(StringImm(storage_scope));
       args.push_back(IntImm(DataType::Int(64), 3));  // 3d
       args.push_back(Call(DataType::Handle(), builtin::tvm_stack_make_shape(),
-                          {texture.width, texture.height, texture.channel}));
+                          {texture.width, texture.height, texture.array_dim}));
       stmt = LetStmt(buffer_var, Call(buffer_var.dtype(), builtin::nd_mem_alloc_with_scope(), args),
                      body);
     }
@@ -178,9 +178,19 @@ class TextureFlattener : public TextureLoweringBase {
           idx_h = 1;
           idx_w = 2;
           idx_c = 3;
+      } else if (DefaultTextureLayoutSeparator(op->buffer->shape.size(), GetStorageScope(buffer)) == 300) {
+          idx_h = 0;
+          idx_w = 1;
+          idx_c = 2;
+          idx_n = 3;
       } else {
         LOG(FATAL) << "Something wrong";
       }
+      std::cout << " >>>>>>>> GetTextureAccessArgs, scope: " << storage_scope << ", shape: ";
+      for (size_t i = 0; i < op->buffer->shape.size(); ++i) {
+          std::cout << op->buffer->shape[i] << ", ";
+      }
+      std::cout << std::endl;
       row_dims.push_back(op->buffer->shape[idx_h]);
       row_indices.push_back(op->indices[idx_h]);
       col_dims.push_back(op->buffer->shape[idx_w]);

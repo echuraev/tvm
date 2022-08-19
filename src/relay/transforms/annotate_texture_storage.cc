@@ -203,8 +203,9 @@ class StorageInfo : private transform::DeviceAwareExprVisitor {
       int a2 = shape[2].as<IntImmNode>()->value;
       int a3 = shape[3].as<IntImmNode>()->value;
 
-      if (a1 == a2 && a0 * a3 < array_limit) return "texture-array-nhwc";
-      if (a2 == a3 && a0 * a1 < array_limit) return "texture-array-nchw";
+      if (a1 == a2 && a0 * a3 < array_limit) return "global.texture-array-nhwc";
+      if (a2 == a3 && a0 * a1 < array_limit) return "global.texture-array-nchw";
+      if (a0 == a1 && a2 * a3 < array_limit) return "global.texture-array-hwoi";
 
       int d3l = a0 * a1 * a2;
       int d3r = a3;

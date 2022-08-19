@@ -53,8 +53,10 @@ inline size_t GetDataAlignment(const DLTensor& arr) {
   return align;
 }
 inline bool Is2DStorage(std::string scope) {
-    auto storage_scope = GetStorageType(scope);
-    return storage_scope == StorageType::Texture || storage_scope == StorageType::TextureArray;
+    return GetStorageType(scope) == StorageType::Texture;
+}
+inline bool Is3DStorage(std::string scope) {
+    return GetStorageType(scope) == StorageType::TextureArray;
 }
 }  // namespace details
 
@@ -367,6 +369,11 @@ void GraphExecutor::SetupStorage() {
   for (size_t i = 0; i < attrs_.shape.size(); ++i) {
     int storage_id = attrs_.storage_id[i];
     std::string storage_scope = attrs_.storage_scope.empty() ? "" : attrs_.storage_scope[i];
+    std::cout << " >>> storage_scope: " << storage_scope << ", shape: ";
+      for (int k = 0; k < attrs_.shape[i].size(); ++k) {
+          std::cout << attrs_.shape[i][k] << ", ";
+      }
+      std::cout << std::endl;
     // Use the fallback device if no device index is available.
     int device_type = static_cast<int>(devices_[0].device_type);
     if (!attrs_.device_index.empty()) {
@@ -396,22 +403,13 @@ void GraphExecutor::SetupStorage() {
     pool_entry[sid].scope = storage_scope;
 
     DLDataType t = vtype[i];
-    if (!details::Is2DStorage(storage_scope)) {
-      size_t size = 1;
-      for (int64_t sz : attrs_.shape[i]) {
-        size *= static_cast<size_t>(sz);
-      }
-      size_t bits = t.bits * t.lanes;
-      ICHECK(bits % 8U == 0U || bits == 1U || bits == 4U);
-      int64_t bytes = ((bits + 7U) / 8U) * size;
-      pool_entry[sid].shape[0] = std::max(pool_entry[sid].shape[0], bytes);
-      pool_entry[sid].dtype = DLDataType{kDLFloat, 32, 1};
-    } else {
+    if (details::Is2DStorage(storage_scope)) {
       if (pool_entry[sid].shape.size() == 1) {
         pool_entry[sid].shape.resize(3, 0);
       }
       size_t axis = runtime::DefaultTextureLayoutSeparator(attrs_.shape[i].size(), storage_scope);
       auto shape = ApplyTexture2DFlattening<int64_t>(attrs_.shape[i], attrs_.shape[i].size(), axis);
+      std::cout << " >>>2d  ApplyTexture2DFlattening<int64_t> shape: " << attrs_.shape[i].size() << ", axis: " << axis << std::endl;
       pool_entry[sid].shape[0] = std::max(pool_entry[sid].shape[0], shape.height);
       pool_entry[sid].shape[1] = std::max(pool_entry[sid].shape[1], shape.width);
       CHECK(pool_entry[sid].shape[2] == 0 || pool_entry[sid].shape[2] == shape.channel)
@@ -423,6 +421,44 @@ void GraphExecutor::SetupStorage() {
           << ", pool entry for 2d texure allocations must be of the same type;"
           << " downstream error from memory planner likely";
       pool_entry[sid].dtype = t;
+    } else if (details::Is3DStorage(storage_scope)) {
+      if (pool_entry[sid].shape.size() == 1) {
+        pool_entry[sid].shape.resize(4, 0);
+      }
+      size_t axis = runtime::DefaultTextureLayoutSeparator(attrs_.shape[i].size(), storage_scope);
+      auto shape = ApplyTexture2DFlattening<int64_t>(attrs_.shape[i], attrs_.shape[i].size(), axis);
+      std::cout << " >>>3d ApplyTexture2DFlattening<int64_t> shape_size: " << attrs_.shape[i].size() << ", axis: " << axis << ", shape: ";
+      for (int k = 0; k < attrs_.shape[i].size(); ++k) {
+          std::cout << attrs_.shape[i][k] << ", ";
+      }
+      std::cout << std::endl;
+      pool_entry[sid].shape[0] = shape.array_dim;
+      pool_entry[sid].shape[1] = std::max(pool_entry[sid].shape[1], shape.height);
+      pool_entry[sid].shape[2] = std::max(pool_entry[sid].shape[2], shape.width);
+      CHECK(pool_entry[sid].shape[3] == 0 || pool_entry[sid].shape[3] == shape.channel)
+          << pool_entry[sid].shape[3] << " != " << shape.channel
+          << ",  texture channel length must be consistent within a storage pool";
+      pool_entry[sid].shape[3] = shape.channel;
+      CHECK(pool_entry[sid].dtype.bits == 0 || TypeEqual(pool_entry[sid].dtype, t))
+          << DLDataType2String(pool_entry[sid].dtype) << " != " << DLDataType2String(t)
+          << ", pool entry for 2d texure allocations must be of the same type;"
+          << " downstream error from memory planner likely";
+      pool_entry[sid].dtype = t;
+    } else {
+      size_t size = 1;
+      for (int64_t sz : attrs_.shape[i]) {
+        size *= static_cast<size_t>(sz);
+      }
+      std::cout << " >>>1d ApplyTexture2DFlattening<int64_t> shape_size: " << attrs_.shape[i].size() << ", shape: ";
+      for (int k = 0; k < attrs_.shape[i].size(); ++k) {
+          std::cout << attrs_.shape[i][k] << ", ";
+      }
+      std::cout << std::endl;
+      size_t bits = t.bits * t.lanes;
+      ICHECK(bits % 8U == 0U || bits == 1U || bits == 4U);
+      int64_t bytes = ((bits + 7U) / 8U) * size;
+      pool_entry[sid].shape[0] = std::max(pool_entry[sid].shape[0], bytes);
+      pool_entry[sid].dtype = DLDataType{kDLFloat, 32, 1};
     }
   }
 
@@ -457,6 +493,11 @@ void GraphExecutor::SetupStorage() {
   for (size_t i = 0; i < data_entry_.size(); ++i) {
     int storage_id = attrs_.storage_id[i];
     ICHECK_LT(static_cast<size_t>(storage_id), storage_pool_.size());
+    std::cout << "storage_id: " << storage_id << ", vtype: " << vtype[i] << ", shape: ";
+    for (int j = 0; j < attrs_.shape[i].size(); ++j) {
+        std::cout << attrs_.shape[i][j] << ", ";
+    }
+    std::cout << std::endl;
     data_entry_[i] = storage_pool_[storage_id].CreateView(attrs_.shape[i], vtype[i]);
 
     const DLTensor* tmp = data_entry_[i].operator->();

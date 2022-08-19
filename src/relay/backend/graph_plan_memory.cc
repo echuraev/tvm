@@ -505,9 +505,12 @@ class StorageAllocator : public StorageAllocaBaseVisitor {
      */
     StorageToken* Request(StorageToken* prototype) {
       auto shape = GetSize2D(prototype);
-      int64_t requested_size = shape.height * shape.width;
-      int64_t min_added_size = std::numeric_limits<int64_t>::max();
-      int64_t min_wasted_size = std::numeric_limits<int64_t>::max();
+      int64_t min_added_size_x = std::numeric_limits<int64_t>::max();
+      int64_t min_added_size_y = std::numeric_limits<int64_t>::max();
+      int64_t min_added_size_z = std::numeric_limits<int64_t>::max();
+      int64_t min_wasted_size_x = std::numeric_limits<int64_t>::max();
+      int64_t min_wasted_size_y = std::numeric_limits<int64_t>::max();
+      int64_t min_wasted_size_z = std::numeric_limits<int64_t>::max();
       int64_t best_storage_id = -1;
       MemBlock best_mem, new_mem;
       for (int64_t free_id : free_list_) {
@@ -516,24 +519,40 @@ class StorageAllocator : public StorageAllocaBaseVisitor {
         if (cached.token_->ttype->dtype != prototype->ttype->dtype) {
           continue;
         }
-        int64_t cached_size = cached.x_ * cached.y_;
-        new_mem.x_ = std::max(cached.x_, shape.width);
-        new_mem.y_ = std::max(cached.y_, shape.height);
-        int64_t expanded_size = new_mem.x_ * new_mem.y_;
-        int64_t added_size = expanded_size - cached_size;
-        int64_t wasted_size = expanded_size - requested_size;
+        int64_t new_width = std::max(cached.x_, shape.width);
+        int64_t new_height = std::max(cached.y_, shape.height);
+        int64_t new_array_size = std::max(cached.z_, shape.array_dim);
+        int64_t added_size_x = new_width - cached.x_;
+        int64_t added_size_y = new_height - cached.y_;
+        int64_t added_size_z = new_array_size - cached.z_;
+        int64_t wasted_size_x = new_width - shape.width;
+        int64_t wasted_size_y = new_height - shape.height;
+        int64_t wasted_size_z = new_array_size - shape.array_dim;
         // Prioritize minimization of added size first, then minimize
         // wasted size among blocks which would not require expansion
-        if ((min_added_size > 0 && added_size < min_added_size) ||
-            (min_added_size == 0 && wasted_size < min_wasted_size)) {
-          min_added_size = added_size;
-          min_wasted_size = wasted_size;
+      if ((min_added_size_x > 0 && added_size_x < min_added_size_x) ||
+          (min_added_size_y > 0 && added_size_y < min_added_size_y) ||
+          (min_added_size_z > 0 && added_size_z < min_added_size_z) ||
+          (min_added_size_x == added_size_x && wasted_size_x < min_wasted_size_x) ||
+          (min_added_size_y == added_size_y && wasted_size_y < min_wasted_size_y) ||
+          (min_added_size_z == added_size_z && wasted_size_z < min_wasted_size_z)) {
+          min_added_size_x = added_size_x;
+          min_added_size_y = added_size_y;
+          min_added_size_z = added_size_z;
+          min_wasted_size_x = wasted_size_x;
+          min_wasted_size_y = wasted_size_y;
+          min_wasted_size_z = wasted_size_z;
           best_storage_id = free_id;
           best_mem = new_mem;
+          new_mem.x_ = new_width;
+          new_mem.y_ = new_height;
+          new_mem.z_ = new_array_size;
         }
       }
 
-      if (min_added_size <= requested_size) {
+      if (static_cast<size_t>(min_added_size_x) <= shape.width ||
+          static_cast<size_t>(min_added_size_y) <= shape.height ||
+          static_cast<size_t>(min_added_size_z) <= shape.array_dim) {
         best_mem.token_ = blocks_[best_storage_id].token_;
         // Reset the reference counter of the now live token
         best_mem.token_->ref_counter = prototype->ref_counter;
@@ -553,6 +572,7 @@ class StorageAllocator : public StorageAllocaBaseVisitor {
       MemBlock block;
       block.x_ = shape.width;
       block.y_ = shape.height;
+      block.z_ = shape.array_dim;
       prototype->storage_id = storage_id;
       block.token_ = prototype;
       blocks_[prototype->storage_id] = block;
@@ -592,6 +612,7 @@ class StorageAllocator : public StorageAllocaBaseVisitor {
       StorageToken* token_;
       int64_t x_;
       int64_t y_;
+      int64_t z_;
     };
 
     std::unordered_map<int64_t, MemBlock> blocks_;

@@ -99,7 +99,7 @@ void* Pool2D::Alloc(Device dev, DeviceAPI* device, size_t array_size, size_t wid
       new_mem.type = type_hint;
       std::vector<int64_t> shape{int64_t(new_mem.y), int64_t(new_mem.x), int64_t(new_mem.z)};
       new_mem.data = device->AllocDataSpace(dev, shape.size(), shape.data(), new_mem.type,
-                                            Optional<String>("global.texture"));
+                                            Optional<String>("global.texture-array-nchw"));
       e = new_mem;
     }
   }
@@ -108,7 +108,7 @@ void* Pool2D::Alloc(Device dev, DeviceAPI* device, size_t array_size, size_t wid
     // create new block
     std::vector<int64_t> shape{int64_t(height), int64_t(width), int64_t(array_size)};
     e.data = device->AllocDataSpace(dev, shape.size(), shape.data(), type_hint,
-                                    Optional<String>("global.texture"));
+                                    Optional<String>("global.texture-array-nchw"));
     e.x = width;
     e.y = height;
     e.z = array_size;

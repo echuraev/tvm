@@ -78,6 +78,8 @@ cl::BufferDescriptor::MemoryLayout cl::BufferDescriptor::MemoryLayoutFromScope(
     return cl::BufferDescriptor::MemoryLayout::kImage2DArrayNCHW;
   } else if (mem_scope.value() == "global.texture-array-nhwc") {
     return cl::BufferDescriptor::MemoryLayout::kImage2DArrayNHWC;
+  } else if (mem_scope.value() == "global.texture-array-hwoi") {
+    return cl::BufferDescriptor::MemoryLayout::kImage2DArrayHWOI;
   }
   LOG(FATAL) << "No memory layout defined for memory of scope: " << mem_scope.value();
   return cl::BufferDescriptor::MemoryLayout::kBuffer1D;
@@ -97,6 +99,8 @@ String cl::BufferDescriptor::ScopeFromMemoryLayout(cl::BufferDescriptor::MemoryL
       return "global.texture-array-nchw";
     case cl::BufferDescriptor::MemoryLayout::kImage2DArrayNHWC:
       return "global.texture-array-nhwc";
+    case cl::BufferDescriptor::MemoryLayout::kImage2DArrayHWOI:
+      return "global.texture-array-hwoi";
   }
   LOG(FATAL) << "No scope corresponding to the provided memory layout: "
              << static_cast<int>(layout);
@@ -234,10 +238,16 @@ void* OpenCLWorkspace::AllocDataSpace(Device dev, int ndim, const int64_t* shape
   ICHECK(ndim > 2) << "Shape for texture allocation must be at least rank 3; "
                    << "provided shape is rank " << ndim;
 
+  std::cout << "OpenCLWorkspace::AllocDataSpace, mem_scope: " << mem_scope.value() << ", shape: ";
+  for (int i = 0; i < ndim; ++i) {
+    std::cout << shape[i] << ", ";
+  }
+  std::cout << std::endl;
+
   cl::BufferDescriptor* desc = new cl::BufferDescriptor(mem_scope);
   size_t axis = DefaultTextureLayoutSeparator(ndim, mem_scope.value());
   auto texture = ApplyTexture2DFlattening<int64_t>(shape, ndim, axis);
-  desc->buffer = AllocTexture(dev, texture.channel, texture.width, texture.height, dtype);
+  desc->buffer = AllocTexture(dev, texture.array_dim, texture.width, texture.height, dtype);
   return desc;
 }
 
@@ -258,17 +268,18 @@ cl_mem OpenCLWorkspace::AllocTexture(Device dev, size_t array_size, size_t width
   cl_int err_code;
   cl_channel_type cl_type = DTypeToOpenCLChannelType(type_hint);
   cl_image_format format = {CL_RGBA, cl_type};
-  array_size = (array_size == 1) ? 0 : array_size;
-  cl_mem_object_type mem_type = (array_size == 0) ? CL_MEM_OBJECT_IMAGE2D : CL_MEM_OBJECT_IMAGE2D_ARRAY;
-  cl_image_desc descriptor = {mem_type, width, height, 0, array_size, 0, 0, 0, 0};
+  cl_image_desc descriptor = {
+      CL_MEM_OBJECT_IMAGE2D_ARRAY, width, height, 0, array_size, 0, 0, 0, 0};
+  std::cout << " >>> OpenCLWorkspace::AllocTexture: ch: " << array_size << ", width: " << width
+            << ", height: " << height << std::endl;
   cl_mem mptr =
       clCreateImage(this->context, CL_MEM_READ_WRITE, &format, &descriptor, nullptr, &err_code);
   OPENCL_CHECK_ERROR(err_code);
   return mptr;
 }
 
-void* OpenCLWorkspace::AllocTextureWorkspace(Device dev, size_t array_size, size_t width, size_t height,
-                                             DLDataType type_hint) {
+void* OpenCLWorkspace::AllocTextureWorkspace(Device dev, size_t array_size, size_t width,
+                                             size_t height, DLDataType type_hint) {
   return GetThreadEntry()->texture_pool.AllocTexture(dev, array_size, width, height, type_hint);
 }
 
@@ -310,6 +321,7 @@ void OpenCLWorkspace::CopyDataFromTo(DLTensor* from, DLTensor* to, TVMStreamHand
             image_info.region, image_info.row_pitch, image_info.slice_pitch,
             static_cast<char*>(to->data) + to->byte_offset, 0, nullptr, nullptr));
         break;
+        // TODO: add image arrays
     }
     OPENCL_CALL(clFinish(this->GetQueue(from->device)));
   } else if (from->device.device_type == kDLCPU && IsOpenCLDevice(to->device)) {
@@ -462,7 +474,7 @@ TVM_REGISTER_GLOBAL("device_api.opencl.alloc_nd").set_body([](TVMArgs args, TVMR
   int64_t* shape = static_cast<int64_t*>(static_cast<void*>(args[6]));
   int64_t width = shape[0];
   int64_t height = shape[1];
-  int64_t channel = shape[2];
+  int64_t array_dim = shape[2];
 
   Device dev;
   dev.device_type = static_cast<DLDeviceType>(device_type);
@@ -474,8 +486,8 @@ TVM_REGISTER_GLOBAL("device_api.opencl.alloc_nd").set_body([](TVMArgs args, TVMR
   type_hint.lanes = 1;
 
   OpenCLWorkspace* ptr = OpenCLWorkspace::Global();
-  *rv = ptr->AllocTextureWorkspace(dev, static_cast<size_t>(channel), static_cast<size_t>(width), static_cast<size_t>(height),
-                                   type_hint);
+  *rv = ptr->AllocTextureWorkspace(dev, static_cast<size_t>(array_dim), static_cast<size_t>(width),
+                                   static_cast<size_t>(height), type_hint);
 });
 
 TVM_REGISTER_GLOBAL("device_api.opencl.free_nd").set_body([](TVMArgs args, TVMRetValue* rv) {

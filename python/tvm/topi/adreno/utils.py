@@ -550,6 +550,10 @@ def get_texture_storage(shape):
         N, C = shape[0], shape[1]
         if N * C < array_limit:
             return "global.texture-array-nchw"
+    elif shape[0] == shape[1]:
+        N, C = shape[2], shape[3]
+        if N * C < array_limit:
+            return "global.texture-array-hwoi"
 
     if shape[0] * shape[1] * shape[2] < limit and shape[3] < limit:
         return "global.texture"
