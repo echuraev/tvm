@@ -575,5 +575,29 @@ def test_size_one_buffer(shape, transform):
     s[B].transform_layout(transform)
 
 
+def test_non_dividable_size():
+    # This test is to catch a failure mode that occurred if a
+    # transformation were applied to a te.compute buffer, and one of
+    # the dimensions of the buffer was 1.  Prior to bugfix,
+    # arith::DetectIterMap would fold the variable as a constant,
+    # causing an error when attempting to solve for the variable using
+    # arith::InverseAffineIterMap.
+
+    dtype = "int8"
+    A = te.placeholder((1, 3, 8, 8), dtype, name="A")
+    B = te.compute(
+        shape=A.shape,
+        fcompute=lambda *indices: A[indices].astype(dtype),
+        name="B",
+    )
+    s = te.create_schedule(B.op)
+
+    # If layout transformation is on the output buffer, and any
+    # dimension of the output buffer is 1, failure occurs in
+    # CheckFusePattern.
+    transform = lambda n, c, h, w: [n, c //4, h, w, c%4]
+    s[B].transform_layout(transform)
+
+
 if __name__ == "__main__":
     tvm.testing.main()
