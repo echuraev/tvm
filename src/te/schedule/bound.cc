@@ -240,7 +240,7 @@ Map<IterVar, Range> InferBound(const Schedule& sch) {
     }
 
     // pass down to get bound of all iter vars.
-    PassDownDomain(stage, &ret, &analyzer);
+    PassDownDomain(stage, &ret, &analyzer, true);
     for (IterVar iv : stage->env_threads) {
       ICHECK(iv->dom.defined());
       ret[iv] = iv->dom;

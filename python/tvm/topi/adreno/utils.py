@@ -448,21 +448,15 @@ def add_pad(
     if layout == "NCHW":
         y_axis = 2
         x_axis = 3
-        if len(data.shape) == 4:
-            _, _, in_height, in_width = data.shape
-        else:
-            _, _, in_height, in_width, _ = data.shape
+        _, _, in_height, in_width = data.shape
     elif layout == "NHWC":
         y_axis = 1
         x_axis = 2
-        if len(data.shape) == 4:
-            _, in_height, in_width, _ = data.shape
-        else:
-            _, in_height, in_width, _, _ = data.shape
+        _, in_height, in_width, _ = data.shape
     else:
         assert False, "not supported layout in adreno util add_pad"
-    pad_before = [0, 0, 0, 0, 0]
-    pad_after = [0, 0, 0, 0, 0]
+    pad_before = [0, 0, 0, 0]
+    pad_after = [0, 0, 0, 0]
     pad_before[y_axis] = pad_top
     pad_before[x_axis] = pad_left
     pad_after[y_axis] = pad_down

@@ -66,6 +66,8 @@ def build_run_compare(
     else:
         run_on_host = 1
         target_host = "llvm"
+    run_on_host = 1
+    target_host = "llvm"
 
     if gpu_preprocess:
         tvm_mod_nchwc = gpu_preprocess(tvm_mod)

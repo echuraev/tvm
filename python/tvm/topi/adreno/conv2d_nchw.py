@@ -80,52 +80,8 @@ def conv2d_nchwc(cfg, Input, Filter, stride, padding, dilation, out_dtype):
     else:
         dilation_h, dilation_w = dilation
 
-    convert_from4d = False
-    if len(Input.shape) == 4:
-        batch, in_channels, in_height, in_width = Input.shape
-        in_channel_chunks, in_channel_block, in_channel_tail = split_to_chunks(in_channels, 4)
-
-        if autotvm.GLOBAL_SCOPE.in_tuning:
-            dshape = (batch, in_channel_chunks, in_height, in_width, in_channel_block)
-            Input = tvm.te.placeholder(dshape, Input.dtype, name="data_placeholder")
-        else:
-            Input = pack_input(
-                Input,
-                "NCHW",
-                batch,
-                in_channel_chunks,
-                in_channel_block,
-                in_channel_tail,
-                in_height,
-                in_width,
-            )
-    else:
-        batch, in_channel_chunks, in_height, in_width, in_channel_block = Input.shape
-
-    if len(Filter.shape) == 4:
-        out_channles, in_filter_channels, kernel_h, kernel_w = Filter.shape
-        out_channel_chunks, out_channel_block, out_channel_tail = split_to_chunks(out_channles, 4)
-
-        if autotvm.GLOBAL_SCOPE.in_tuning:
-            kshape = (out_channel_chunks, in_filter_channels, kernel_h, kernel_w, out_channel_block)
-            Filter = tvm.te.placeholder(kshape, Filter.dtype, name="kernel_placeholder")
-        else:
-            convert_from4d = True
-            Filter = pack_filter(
-                Filter,
-                "OIHW",
-                out_channel_chunks,
-                out_channel_block,
-                out_channel_tail,
-                in_filter_channels,
-                in_channel_chunks,
-                in_channel_block,
-                in_channel_tail,
-                kernel_h,
-                kernel_w,
-            )
-    else:
-        out_channel_chunks, in_filter_channels, kernel_h, kernel_w, out_channel_block = Filter.shape
+    batch, in_channel, in_height, in_width = Input.shape
+    out_channel, in_filter_channels, kernel_h, kernel_w = Filter.shape
 
     out_height_orig, out_height, out_width_orig, out_width = expand_spatial_dimensions(
         in_height, in_width, kernel_h, kernel_w, dilation_h, dilation_w, padding, stride_h, stride_w
@@ -145,40 +101,25 @@ def conv2d_nchwc(cfg, Input, Filter, stride, padding, dilation, out_dtype):
         stride_w,
     )
 
-    rcc = te.reduce_axis((0, in_channel_chunks), name="rc")
-    rcb = te.reduce_axis((0, in_channel_block), name="rc")
+    rcc = te.reduce_axis((0, in_channel), name="rc")
     ry = te.reduce_axis((0, kernel_h), name="ry")
     rx = te.reduce_axis((0, kernel_w), name="rx")
-
     conv = te.compute(
-        (batch, out_channel_chunks, out_height, out_width, out_channel_block),
-        lambda nn, ffc, yy, xx, ffb: te.sum(
+        (batch, out_channel, out_height, out_width),
+        lambda nn, fc, yy, xx: te.sum(
             (
-                temp[nn, rcc, yy * stride_h + ry * dilation_h, xx * stride_w + rx * dilation_w, rcb]
-                * Filter[ffc, rcc * in_channel_block + rcb, ry, rx, ffb]
+                temp[nn, rcc, yy * stride_h + ry * dilation_h, xx * stride_w + rx * dilation_w]
+                * Filter[fc, rcc, ry, rx]
             ).astype(out_dtype),
-            axis=[rcc, rcb, ry, rx],
+            axis=[rcc, ry, rx],
         ),
         tag="conv2d_nchwc",
     )
-
-    if convert_from4d and not autotvm.GLOBAL_SCOPE.in_tuning:
-        dummy_cast = te.compute(
-            (batch, out_channel_chunks, out_height_orig, out_width_orig, out_channel_block),
-            lambda n, fc, y, x, fb: conv[n, fc, y, x, fb].astype(out_dtype),
-            tag="dummy_cast",
-        )
-        return te.compute(
-            (batch, out_channles, out_height_orig, out_width_orig),
-            lambda n, c, y, x: dummy_cast[n, c // out_channel_block, y, x, c % out_channel_block],
-            tag="adreno_conv2d_latest_op",
-        )
-    else:
-        return te.compute(
-            (batch, out_channel_chunks, out_height_orig, out_width_orig, out_channel_block),
-            lambda n, ffc, y, x, ffb: conv[n, ffc, y, x, ffb].astype(out_dtype),
-            tag="adreno_conv2d_latest_op",
-        )
+    return te.compute(
+        (batch, out_channel, out_height_orig, out_width_orig),
+        lambda n, ffc, y, x: conv[n, ffc, y, x,].astype(out_dtype),
+        tag="adreno_conv2d_latest_op",
+    )
 
 
 def schedule_conv2d_NCHWc_KCRSk(cfg, s, output):
@@ -205,30 +146,32 @@ def schedule_conv2d_NCHWc_KCRSk(cfg, s, output):
     7. In case of 4d conv we need to schedule postops as well
     """
     latest = s.outputs[0].output(0)
-    if len(latest.op.axis) == 4:
-        latest_blocked = dummy = output.op.input_tensors[0]
-        conv = dummy.op.input_tensors[0]
-    else:
-        conv = output.op.input_tensors[0]
-        latest_blocked = latest
+    conv = output.op.input_tensors[0]
+    latest_blocked = latest
 
     pad_data, kernel = s[conv].op.input_tensors
-    filter_pack_rt = bool(
-        isinstance(kernel.op, tvm.te.ComputeOp) and "filter_pack" in kernel.op.tag
-    )
+    input = s[pad_data].op.input_tensors[0]
 
-    if "pad_temp" in pad_data.op.name:
-        input_pad_temp = pad_data.op.input_tensors[0]
-    else:
-        input_pad_temp = pad_data
+    print("-" * 10)
+    print("1. pad_data.shape: ", pad_data.shape)
+    transform_data = lambda n, c, h, w: [n, c //4, h, w, c%4]
+    pad_data_t = s[input].transform_layout(transform_data)
+    pad_data_t = s[pad_data].transform_layout(transform_data)
+    print("2. pad_data.shape: ", pad_data_t)
+    print("-" * 10)
+    print("-" * 10)
+    print("1. kernel.shape: ", kernel.shape)
+    transform_weights = lambda o, i, h, w: [o // 4, i, h, w, o%4]
+    kernel_t = s[kernel].transform_layout(transform_weights)
+    print("2. kernel.shape: ", kernel_t)
+    print("-" * 10)
 
-    input_pack_rt = bool(
-        isinstance(input_pad_temp.op, tvm.te.ComputeOp) and "input_pack" in input_pad_temp.op.tag
-    )
-
+    print("<" * 10)
+    print(s[kernel].layout_transforms)
+    print(">" * 10)
     ##### space definition begin #####
-    n, fc, y, x, fb = s[conv].op.axis
-    rcc, rcb, ry, rx = s[conv].op.reduce_axis
+    c_n, c_fc, c_y, c_x, c_fb = s[conv].transform_layout(transform_data)
+    rcc, ry, rx = s[conv].op.reduce_axis
 
     if conv.shape[1] % 2 == 0:
         min_threads_div = 2
@@ -236,7 +179,7 @@ def schedule_conv2d_NCHWc_KCRSk(cfg, s, output):
         min_threads_div = 1
     cfg.define_split(
         "tile_fc",
-        fc,
+        c_fc,
         num_outputs=3,
         filter=lambda entity: entity.size[1] <= 8
         and entity.size[2] >= min_threads_div
@@ -244,13 +187,13 @@ def schedule_conv2d_NCHWc_KCRSk(cfg, s, output):
     )
     cfg.define_split(
         "tile_y",
-        y,
+        c_y,
         num_outputs=3,
         filter=lambda entity: entity.size[1] <= 8 and entity.size[2] <= 16,
     )
     cfg.define_split(
         "tile_x",
-        x,
+        c_x,
         num_outputs=3,
         filter=lambda entity: entity.size[1] <= 8 and entity.size[2] <= 16,
     )
@@ -273,7 +216,6 @@ def schedule_conv2d_NCHWc_KCRSk(cfg, s, output):
         get_default_conv2d_config(cfg, conv.shape[1], conv.shape[2], conv.shape[3])
     ##### space definition end #####
 
-    pad_data, kernel = s[conv].op.input_tensors
     # There are several conditions that have to be handled:
     # 1. If we are in the tuning, we always add cache read for data to main conv kernel
     #    to get texture in tuning opencl kernel
@@ -281,39 +223,27 @@ def schedule_conv2d_NCHWc_KCRSk(cfg, s, output):
     #    stage of data copy from 4d to 5d (referred as pack_data).
     # 3. If we have pad (independently if we have runtime repack or not) we should inline it in the
     #    cache_read("texture")
-    if autotvm.GLOBAL_SCOPE.in_tuning or input_pack_rt:
-        if autotvm.GLOBAL_SCOPE.in_tuning:
-            if "pad_temp" in pad_data.op.name:
-                s[pad_data].compute_inline()
-        else:
-            if "pad_temp" in pad_data.op.name:
-                pack_data = pad_data.op.input_tensors[0]
-                bind_data_copy(s[pack_data])
-                s[pad_data].compute_inline()
-            else:
-                pack_data = pad_data
-                bind_data_copy(s[pack_data])
+    if autotvm.GLOBAL_SCOPE.in_tuning:
+        if "pad_temp" in pad_data.op.name:
+            s[pad_data].compute_inline()
 
         AT = s.cache_read(pad_data, get_texture_storage(pad_data.shape), [conv])
         bind_data_copy(s[AT])
+        WT = s.cache_read(kernel, get_texture_storage(kernel.shape), [conv])
+        bind_data_copy(s[WT])
     elif "pad_temp" in pad_data.op.name:
         s[pad_data].compute_inline()
         # create cache stage
-        AT = s.cache_read(pad_data, get_texture_storage(pad_data.shape), [conv])
-        bind_data_copy(s[AT])
-
-    if autotvm.GLOBAL_SCOPE.in_tuning or filter_pack_rt:
-        if not autotvm.GLOBAL_SCOPE.in_tuning:
-            bind_data_copy(s[kernel])
-        WT = s.cache_read(kernel, get_texture_storage(kernel.shape), [conv])
-        bind_data_copy(s[WT])
+        ##AT = s.cache_read(pad_data, get_texture_storage(pad_data.shape), [conv])
+        ##bind_data_copy(s[AT])
 
     s[conv].set_scope("local")
     if latest_blocked == latest and output != latest:
         s[output].compute_inline()
 
     # tile and bind spatial axes
-    n, fc, y, x, fb = s[latest_blocked].op.axis
+    #n, fc, y, x = s[latest_blocked].op.axis
+    n, fc, y, x, fb = s[latest_blocked].transform_layout(transform_data)
 
     kernel_scope, n = s[latest_blocked].split(n, nparts=1)
 
@@ -337,16 +267,15 @@ def schedule_conv2d_NCHWc_KCRSk(cfg, s, output):
     s[conv].compute_at(s[latest_blocked], tx)
 
     # tile reduction axes
-    n, fc, y, x, fb = s[conv].op.axis
+    n, fc, y, x, fb = c_n, c_fc, c_y, c_x, c_fb
 
-    rcc, rcb, ry, rx = s[conv].op.reduce_axis
+    rcc, ry, rx = s[conv].op.reduce_axis
     rco, rci = cfg["tile_rcc"].apply(s, conv, rcc)
     ryo, ryi = cfg["tile_ry"].apply(s, conv, ry)
     rxo, rxi = cfg["tile_rx"].apply(s, conv, rx)
 
-    s[conv].reorder(rco, ryo, rxo, rci, ryi, rxi, rcb, n, fc, y, x, fb)
+    s[conv].reorder(rco, ryo, rxo, rci, ryi, rxi, n, fc, y, x, fb)
     s[conv].vectorize(fb)
-    s[conv].unroll(rcb)
 
     # unroll
     s[latest_blocked].pragma(kernel_scope, "auto_unroll_max_step", cfg["auto_unroll_max_step"].val)
@@ -358,9 +287,9 @@ def schedule_conv2d_NCHWc_KCRSk(cfg, s, output):
         if latest != output:
             s[output].compute_inline()
 
-    N, OCC, OH, OW, OCB = get_const_tuple(latest_blocked.shape)
-    _, IC, KH, KW, _ = get_const_tuple(kernel.shape)
+    N, OCC, OH, OW = get_const_tuple(latest_blocked.shape)
+    _, IC, KH, KW = get_const_tuple(kernel.shape)
     ICKHKW = IC * KH * KW
 
     if isinstance(N, int):
-        cfg.add_flop(2 * N * OH * OW * OCC * OCB * ICKHKW)
+        cfg.add_flop(2 * N * OH * OW * OCC * ICKHKW)
