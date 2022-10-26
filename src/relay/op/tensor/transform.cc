@@ -3136,7 +3136,7 @@ the entries indicate where along axis the array is split.
     .set_support_level(3)
     .add_type_rel("Split", SplitRel)
     .set_attr<FTVMCompute>("FTVMCompute", SplitCompute)
-    .set_attr<FInferCorrectLayout>("FInferCorrectLayout", SplitInferCorrectLayout)
+    //.set_attr<FInferCorrectLayout>("FInferCorrectLayout", SplitInferCorrectLayout)
     .set_attr<TOpPattern>("TOpPattern", kInjective);
 
 // relay.slice_like

@@ -372,10 +372,12 @@ class StorageAllocator : public StorageAllocaBaseVisitor {
 
     // check if there is orphaned output that can be released immediately.
     for (StorageToken* tok : token_map_.at(call_node)) {
+        std::cout << " >>> allocator_.CheckForRelease, tok.id: " << tok->storage_id << ", tok.ref_count: " << tok->ref_counter << std::endl;
       allocator_.CheckForRelease(tok);
     }
     for (StorageToken* tok : args) {
       tok->ref_counter -= 1;
+        std::cout << " >>> args , tok.id: " << tok->storage_id << ", tok.ref_count: " << tok->ref_counter << std::endl;
       allocator_.CheckForRelease(tok);
     }
   }
@@ -502,10 +504,13 @@ class StorageAllocator : public StorageAllocaBaseVisitor {
      */
     StorageToken* Request(StorageToken* prototype) {
       auto shape = GetSize2D(prototype);
-      int64_t requested_size = shape.height * shape.width;
-      int64_t min_added_size = std::numeric_limits<int64_t>::max();
-      int64_t min_wasted_size = std::numeric_limits<int64_t>::max();
+      const int64_t max_ratio = 5;
+      int64_t min_added_size_x = std::numeric_limits<int64_t>::max();
+      int64_t min_added_size_y = std::numeric_limits<int64_t>::max();
+      int64_t min_wasted_size_x = std::numeric_limits<int64_t>::max();
+      int64_t min_wasted_size_y = std::numeric_limits<int64_t>::max();
       int64_t best_storage_id = -1;
+      bool initialized = false;
       MemBlock best_mem, new_mem;
       for (int64_t free_id : free_list_) {
         MemBlock& cached = blocks_[free_id];
@@ -513,30 +518,58 @@ class StorageAllocator : public StorageAllocaBaseVisitor {
         if (cached.token_->ttype->dtype != prototype->ttype->dtype) {
           continue;
         }
-        int64_t cached_size = cached.x_ * cached.y_;
-        new_mem.x_ = std::max(cached.x_, shape.width);
-        new_mem.y_ = std::max(cached.y_, shape.height);
-        int64_t expanded_size = new_mem.x_ * new_mem.y_;
-        int64_t added_size = expanded_size - cached_size;
-        int64_t wasted_size = expanded_size - requested_size;
+        // avoid reusing too small and too big textures
+        if (shape.width / cached.x_ > max_ratio || cached.x_ / shape.width > max_ratio ||
+            shape.height / cached.y_ > max_ratio || cached.y_ / shape.height > max_ratio) {
+          continue;
+        }
+        initialized = true;
+        int64_t new_width = std::max(cached.x_, shape.width);
+        int64_t new_height = std::max(cached.y_, shape.height);
+        int64_t added_size_x = new_width - cached.x_;
+        int64_t added_size_y = new_height - cached.y_;
+        int64_t wasted_size_x = new_width - shape.width;
+        int64_t wasted_size_y = new_height - shape.height;
         // Prioritize minimization of added size first, then minimize
         // wasted size among blocks which would not require expansion
-        if ((min_added_size > 0 && added_size < min_added_size) ||
-            (min_added_size == 0 && wasted_size < min_wasted_size)) {
-          min_added_size = added_size;
-          min_wasted_size = wasted_size;
+        if ((min_added_size_x > 0 && added_size_x < min_added_size_x) ||
+            (min_added_size_y > 0 && added_size_y < min_added_size_y) ||
+            (min_added_size_x == added_size_x && wasted_size_x < min_wasted_size_x) ||
+            (min_added_size_y == added_size_y && wasted_size_y < min_wasted_size_y)) {
+          min_added_size_x = added_size_x;
+          min_added_size_y = added_size_y;
+          min_wasted_size_x = wasted_size_x;
+          min_wasted_size_y = wasted_size_y;
           best_storage_id = free_id;
-          best_mem = new_mem;
+          best_mem = cached;
+          new_mem.x_ = new_width;
+          new_mem.y_ = new_height;
         }
       }
+      if (free_list_.size() && initialized) {
+          std::cout << free_list_.size() << ". old_id: " << best_mem.token_->storage_id << ", old_shape: " << best_mem.x_ << "x" << best_mem.y_ << ", new_shape: " << new_mem.x_ << "x" << new_mem.y_ << std::endl;
+      }
 
-      if (min_added_size <= requested_size) {
-        best_mem.token_ = blocks_[best_storage_id].token_;
-        // Reset the reference counter of the now live token
-        best_mem.token_->ref_counter = prototype->ref_counter;
-        blocks_[best_storage_id] = best_mem;
+      if (min_added_size_x == 0 && min_added_size_y == 0) {
+          std::cout << " >>> min_added_size_x == 0 && min_added_size_y == 0, best_mem.size: " << best_mem.x_ << "x" << best_mem.y_ << std::endl;
+        // use existing block
         free_list_.erase(best_storage_id);
+          std::cout << " >>> after erase" << std::endl;
+        //blocks_[best_storage_id] = best_mem;
+        //best_mem.token_->ref_counter += 2;
+        best_mem.token_->ref_counter += prototype->ref_counter;
         return best_mem.token_;
+      } else if (static_cast<size_t>(min_added_size_x) <= shape.width ||
+                 static_cast<size_t>(min_added_size_y) <= shape.height) {
+          std::cout << " >>> static_cast<size_t>(min_added_size_x) <= shape.width || static_cast<size_t>(min_added_size_y) <= shape.height: " << static_cast<size_t>(min_added_size_x) << " <= " << shape.width << " || " << static_cast<size_t>(min_added_size_y) << " <= " << shape.height << std::endl;
+        //best_mem.token_ = blocks_[best_storage_id].token_;
+        //// Reset the reference counter of the now live token
+        //free_list_.erase(best_storage_id);
+        //new_mem.token_ = prototype;
+        //new_mem.token_->ref_counter += 1;
+        //new_mem.token_->storage_id = best_storage_id;
+        //blocks_[best_storage_id] = new_mem;
+        //return new_mem.token_;
       }
       return nullptr;
     }

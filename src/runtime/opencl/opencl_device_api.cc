@@ -250,6 +250,7 @@ cl_mem OpenCLWorkspace::AllocTexture(Device dev, size_t width, size_t height,
   cl_channel_type cl_type = DTypeToOpenCLChannelType(type_hint);
   cl_image_format format = {CL_RGBA, cl_type};
   cl_image_desc descriptor = {CL_MEM_OBJECT_IMAGE2D, width, height, 0, 0, 0, 0, 0, 0};
+  std::cout << "OpenCLWorkspace::AllocTexture: " << width << "x" << height << std::endl;
   cl_mem mptr =
       clCreateImage(this->context, CL_MEM_READ_WRITE, &format, &descriptor, nullptr, &err_code);
   OPENCL_CHECK_ERROR(err_code);
@@ -276,30 +277,41 @@ void OpenCLWorkspace::CopyDataFromTo(DLTensor* from, DLTensor* to, TVMStreamHand
     auto* to_desc = static_cast<cl::BufferDescriptor*>(to->data);
     if (to_desc->layout == cl::BufferDescriptor::MemoryLayout::kBuffer1D &&
         from_desc->layout == cl::BufferDescriptor::MemoryLayout::kBuffer1D) {
+        std::cout << "CopyDataFromTo: buffer -> buffer, nbytes: " << nbytes << std::endl;
       OPENCL_CALL(clEnqueueCopyBuffer(this->GetQueue(to->device), from_desc->buffer,
                                       to_desc->buffer, from->byte_offset, to->byte_offset, nbytes,
                                       0, nullptr, nullptr));
     } else if (to_desc->layout != cl::BufferDescriptor::MemoryLayout::kBuffer1D &&
                from_desc->layout == cl::BufferDescriptor::MemoryLayout::kBuffer1D) {
       auto image_info = GetImageInfo(to_desc, to);
+        std::cout << "CopyDataFromTo: buffer -> image: "
+            << "\n\timage_origin: " << image_info.origin[0] << "x" << image_info.origin[1] << "x" << image_info.origin[2]
+            << "\n\timage_region: " << image_info.region[0] << "x" << image_info.region[1] << "x" << image_info.region[2]  << std::endl;
       OPENCL_CALL(clEnqueueCopyBufferToImage(this->GetQueue(to->device), from_desc->buffer,
                                              to_desc->buffer, from->byte_offset, image_info.origin,
                                              image_info.region, 0, nullptr, nullptr));
     } else if (to_desc->layout == cl::BufferDescriptor::MemoryLayout::kBuffer1D &&
                from_desc->layout != cl::BufferDescriptor::MemoryLayout::kBuffer1D) {
       auto image_info = GetImageInfo(from_desc, from);
+        std::cout << "CopyDataFromTo: image -> buffer: "
+            << "\n\timage_origin: " << image_info.origin[0] << "x" << image_info.origin[1] << "x" << image_info.origin[2]
+            << "\n\timage_region: " << image_info.region[0] << "x" << image_info.region[1] << "x" << image_info.region[2]  << std::endl;
       OPENCL_CALL(clEnqueueCopyImageToBuffer(this->GetQueue(to->device), from_desc->buffer,
                                              to_desc->buffer, image_info.origin, image_info.region,
                                              to->byte_offset, 0, nullptr, nullptr));
     } else {
       auto to_image_info = GetImageInfo(to_desc, to);
       auto from_image_info = GetImageInfo(from_desc, from);
+        std::cout << "CopyDataFromTo: image -> image: "
+            << "\n\tto_image_origin: " << to_image_info.origin[0] << "x" << to_image_info.origin[1] << "x" << to_image_info.origin[2] << "\tfrom_image_origin: " << from_image_info.origin[0] << "x" << from_image_info.origin[1] << "x" << from_image_info.origin[2]
+            << "\n\tto_image_region: " << to_image_info.region[0] << "x" << to_image_info.region[1] << "x" << to_image_info.region[2] << "\tfrom_image_region: " << from_image_info.region[0] << "x" << from_image_info.region[1] << "x" << from_image_info.region[2]  << std::endl;
       OPENCL_CALL(clEnqueueCopyImage(this->GetQueue(to->device), from_desc->buffer, to_desc->buffer,
                                      from_image_info.origin, to_image_info.origin,
                                      to_image_info.region, 0, nullptr, nullptr));
     }
   } else if (IsOpenCLDevice(from->device) && to->device.device_type == kDLCPU) {
     const auto* from_desc = static_cast<const cl::BufferDescriptor*>(from->data);
+        std::cout << "From dev to host ::: CopyDataFromTo: buffer -> buffer, nbytes: " << nbytes << std::endl;
     switch (from_desc->layout) {
       case cl::BufferDescriptor::MemoryLayout::kBuffer1D:
         OPENCL_CALL(clEnqueueReadBuffer(
@@ -321,6 +333,7 @@ void OpenCLWorkspace::CopyDataFromTo(DLTensor* from, DLTensor* to, TVMStreamHand
     }
     OPENCL_CALL(clFinish(this->GetQueue(from->device)));
   } else if (from->device.device_type == kDLCPU && IsOpenCLDevice(to->device)) {
+        std::cout << "From host to dev ::: CopyDataFromTo: buffer -> buffer, nbytes: " << nbytes << std::endl;
     auto* to_desc = static_cast<cl::BufferDescriptor*>(to->data);
     switch (to_desc->layout) {
       case cl::BufferDescriptor::MemoryLayout::kBuffer1D:
