@@ -329,7 +329,10 @@ class GraphExecutorCodegen : public backend::MemoizedExprTranslator<std::vector<
     // storage scope
     std::vector<std::string> storage_scope;
     for (const auto& virtual_device : storage_info->virtual_devices) {
-      storage_scope.push_back(std::string(virtual_device->memory_scope));
+      std::string mem_scope = std::string(virtual_device->memory_scope);
+      // Remove end of memory type e.g.: texture-nchw -> texture
+      mem_scope = mem_scope.substr(0, mem_scope.find("-"));
+      storage_scope.push_back(mem_scope);
     }
     node->attrs_["storage_scope"] = std::move(storage_scope);
     auto node_id = nodes_.size();

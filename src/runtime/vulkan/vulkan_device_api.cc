@@ -440,6 +440,7 @@ TVM_REGISTER_GLOBAL("device_api.vulkan").set_body([](TVMArgs args, TVMRetValue* 
   *rv = static_cast<void*>(ptr);
 });
 
+// Who is using this method?
 TVM_REGISTER_GLOBAL("device_api.vulkan.get_target_property")
     .set_body_typed([](Device dev, const std::string& property) {
       TVMRetValue rv;

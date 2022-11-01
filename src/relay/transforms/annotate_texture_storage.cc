@@ -45,6 +45,7 @@
 #include "../op/memory/device_copy.h"
 #include "../op/memory/memory.h"
 #include "../transforms/device_aware_visitors.h"
+#include "../../runtime/texture.h"
 
 namespace tvm {
 namespace relay {
@@ -251,28 +252,8 @@ class StorageInfo : private transform::DeviceAwareExprVisitor {
       int a1 = shape[1].as<IntImmNode>()->value;
       int a2 = shape[2].as<IntImmNode>()->value;
       int a3 = shape[3].as<IntImmNode>()->value;
-
-      int d3l = a0 * a1 * a2;
-      int d3r = a3;
-      int diff3 = d3l > d3r ? d3l - d3r : d3r - d3l;
-      if (d3l < limit && d3r < limit) diffs[diff3] = "";
-
-      int d2l = a0 * a1;
-      int d2r = a2 * a3;
-      int diff2 = d2l > d2r ? d2l - d2r : d2r - d2l;
-      if (d2l < limit && d2r < limit) diffs[diff2] = "nhwc";
-
-      int d1l = a0;
-      int d1r = a1 * a2 * a3;
-      int diff1 = d1l > d1r ? d1l - d1r : d1r - d1l;
-      if (d1l < limit && d1r < limit) diffs[diff1] = "weight";
-      if (!diffs.empty()) {
-        std::string scope = "global.texture";
-        if (!diffs.begin()->second.empty()) {
-          scope += ("-" + diffs.begin()->second);
-        }
-        return scope;
-      }
+      int a4 = shape[4].as<IntImmNode>()->value;
+      return runtime::GetMemoryScopeFromShape({a0, a1, a2, a3, a4}, limit);
     }
     return "global";
   }

@@ -396,7 +396,15 @@ class RelayBuildModule : public runtime::ModuleNode {
     relay_module = transform::Inline()(relay_module);
     relay_module = transform::InferType()(relay_module);
     relay_module = transform::LabelOps()(relay_module);
+    //std::cout << "1111111111111111111111111111" << std::endl;
+    ////std::cout << PrettyPrint(relay_module) << std::endl;
+    //std::cout << GetGraphJSON() << std::endl;
+    //std::cout << "1111111111111111111111111111" << std::endl;
     relay_module = transform::AnnotateMemoryScope(config_)(relay_module);
+    //std::cout << "2222222222222222222222222222" << std::endl;
+    ////std::cout << PrettyPrint(relay_module) << std::endl;
+    //std::cout << GetGraphJSON() << std::endl;
+    //std::cout << "2222222222222222222222222222" << std::endl;
 
     ICHECK(relay_module.defined());
 
@@ -476,6 +484,8 @@ class RelayBuildModule : public runtime::ModuleNode {
         }
       }
     }
+
+    std::cout << "JSON:\n" << GetGraphJSON() << std::endl;
   }
 
  protected:

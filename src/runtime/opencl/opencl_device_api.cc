@@ -55,6 +55,26 @@ ImageInfo GetImageInfo(const cl::BufferDescriptor* desc, const DLTensor* tensor)
   info.row_pitch = 0;
   info.slice_pitch = 0;
 
+  //ICHECK(tensor->ndim == 5) << "Image should have 5 dimensions";
+    //static const auto* f_cpu_count = runtime::Registry::Get("target.TargetKindGetAttr");
+  //int limit = 16384;
+  //    auto target = Target::Current();
+  //    int limit = target->GetAttr<Integer>("texture_spatial_limit").value_or(Integer(16384))->value;
+
+  //    // Here I can call OpenCL method to get info about max size!
+  //int a0 = tensor->shape[0];
+  //int a1 = tensor->shape[1];
+  //int a2 = tensor->shape[2];
+  //int a3 = tensor->shape[3];
+  //int a4 = tensor->shape[4];
+  //auto memory_scope = GetMemoryScopeFromShape({a0, a1, a2, a3, a4}, limit);
+  //size_t axis = DefaultTextureLayoutSeparator(tensor->ndim, memory_scope);
+  std::cout << "GetImageInfo: scope: " << cl::BufferDescriptor::ScopeFromMemoryLayout(desc->layout) << ", shape: "
+      << tensor->shape[0] << ", "
+      << tensor->shape[1] << ", "
+      << tensor->shape[2] << ", "
+      << tensor->shape[3] << ", "
+      << tensor->shape[4] << std::endl;
   size_t axis = DefaultTextureLayoutSeparator(
       tensor->ndim, cl::BufferDescriptor::ScopeFromMemoryLayout(desc->layout));
   auto texture_shape = ApplyTexture2DFlattening<int64_t>(tensor->shape, tensor->ndim, axis);

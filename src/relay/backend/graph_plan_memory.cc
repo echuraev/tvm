@@ -517,10 +517,6 @@ class StorageAllocator : public StorageAllocaBaseVisitor {
         if (cached.token_->ttype->dtype != prototype->ttype->dtype) {
           continue;
         }
-        // Can only reuse texture 2d blocks of the same scope
-        if (cached.token_->virtual_device->memory_scope != prototype->virtual_device->memory_scope) {
-          continue;
-        }
         // avoid reusing too small and too big textures
         if (shape.width / cached.x_ > max_ratio || cached.x_ / shape.width > max_ratio ||
             shape.height / cached.y_ > max_ratio || cached.y_ / shape.height > max_ratio) {

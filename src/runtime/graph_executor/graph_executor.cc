@@ -31,6 +31,7 @@
 #include <tvm/runtime/profiling.h>
 #include <tvm/runtime/registry.h>
 #include <tvm/runtime/serializer.h>
+//#include <tvm/target/target.h>
 
 #include <algorithm>
 #include <functional>
@@ -368,9 +369,11 @@ void GraphExecutor::SetupStorage() {
     std::string storage_scope = attrs_.storage_scope.empty() ? "" : attrs_.storage_scope[i];
     // Use the fallback device if no device index is available.
     int device_type = static_cast<int>(devices_[0].device_type);
+    Device dev = devices_[0];
     if (!attrs_.device_index.empty()) {
       device_type = attrs_.device_index[i];
     }
+      auto api = runtime::DeviceAPI::Get(devices_[0], true);
 
     uint32_t sid = static_cast<uint32_t>(storage_id);
     if (sid >= pool_entry.size()) {
@@ -409,8 +412,28 @@ void GraphExecutor::SetupStorage() {
       if (pool_entry[sid].shape.size() == 1) {
         pool_entry[sid].shape.resize(3, 0);
       }
+      //auto target = Target::Current();
+      //int limit = target->GetAttr<Integer>("texture_spatial_limit").value_or(Integer(16384))->value;
+      int limit = 16384;
+      storage_scope = runtime::GetMemoryScopeFromShape(attrs_.shape[i], limit);
+      pool_entry[sid].scope = storage_scope;
       size_t axis = runtime::DefaultTextureLayoutSeparator(attrs_.shape[i].size(), storage_scope);
       auto shape = ApplyTexture2DFlattening<int64_t>(attrs_.shape[i], attrs_.shape[i].size(), axis);
+      //std::cout << "graph_executor, storage_scope: "<< storage_scope << ", height max: (" << pool_entry[sid].shape[0] << " vs " << shape.height
+      //          << "), width max: (" << pool_entry[sid].shape[1] << " vs " << shape.width << "), orig shape: ";
+      //for (auto it: attrs_.shape[i]) {
+      //    std::cout << it << ", ";
+      //}
+      //std::cout << std::endl;
+      std::cout << pool_entry[sid].param_data_entry << ". First alloc: scope: " << pool_entry[sid].scope << ", shape: ";
+      std::cout << "max(" << pool_entry[sid].shape[0] << ", " << shape.height << "), ";
+      std::cout << "max(" << pool_entry[sid].shape[1] << ", " << shape.width << "), ";
+      std::cout << "(" << pool_entry[sid].shape[2] << ", " << shape.channel << "), ";
+      std::cout << ", shape2: ";
+      for (auto& it : attrs_.shape[i]) {
+          std::cout << it << ", ";
+      }
+      // probably add list with possible shapes
       pool_entry[sid].shape[0] = std::max(pool_entry[sid].shape[0], shape.height);
       pool_entry[sid].shape[1] = std::max(pool_entry[sid].shape[1], shape.width);
       CHECK(pool_entry[sid].shape[2] == 0 || pool_entry[sid].shape[2] == shape.channel)
@@ -422,6 +445,11 @@ void GraphExecutor::SetupStorage() {
           << ", pool entry for 2d texure allocations must be of the same type;"
           << " downstream error from memory planner likely";
       pool_entry[sid].dtype = t;
+      std::cout << ", shape3: ";
+      for (auto& it : pool_entry[sid].shape) {
+          std::cout << it << ", ";
+      }
+      std::cout << std::endl;
     }
   }
 
@@ -443,6 +471,14 @@ void GraphExecutor::SetupStorage() {
       Optional<String> mem_scope;
       if (!pit.scope.empty()) {
         mem_scope = String(pit.scope);
+      }
+      if (pit.scope == "global.texture-nhwc" && shape[0] == 28 && shape[1] == 672 &&
+          shape[2] == 4) {
+        std::cout << "Alloc: " << pit.scope << ", shape: ";
+        for (auto& it : shape) {
+          std::cout << it << ", ";
+        }
+        std::cout << std::endl;
       }
       storage_pool_.push_back(NDArray::Empty(shape, pit.dtype, dev, mem_scope));
     }
