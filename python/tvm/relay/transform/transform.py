@@ -118,6 +118,28 @@ def InferTypeLocal(expr):
     return _ffi_api.InferTypeLocal(expr)
 
 
+def AnnotateMemoryScope():
+    """Fold the constant expressions in a Relay program.
+
+    Because of backward compatibility reason it skips QNN primitives from folding by default.
+    There are some transformation passes like FakeQuantizationToInteger, which requires to keep QNN
+    primitives for constant subgraphs. Uncontrolled constant folding of QNN primitives may break
+    applicability of FakeQuantizationToInteger. We suggest to use FoldConstant pass with none
+    default fold_qnn=True value only when all other QNN sensitive passes were already applied.
+
+    Parameters
+    ----------
+    fold_qnn: bool
+        Whether to fold constants for QNN operations.
+
+    Returns
+    -------
+    ret : tvm.transform.Pass
+        The registered pass for constant folding.
+    """
+    return _ffi_api.AnnotateMemoryScope()
+
+
 def FoldScaleAxis():
     """Fold the scaling of axis into weights of conv2d/dense. This pass will
     invoke both forward and backward scale folding.

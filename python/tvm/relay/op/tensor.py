@@ -28,6 +28,8 @@ from . import op as reg
 
 
 def _make_virtual_device(device):
+    if isinstance(device, target.VirtualDevice):
+        return device
     if isinstance(device, _Device):
         return target.VirtualDevice(device)
     if isinstance(device, str):
