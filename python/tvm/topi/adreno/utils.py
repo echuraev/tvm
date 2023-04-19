@@ -582,6 +582,17 @@ def get_texture_storage(shape):
     # limit = 16384
     limit = tvm.target.Target.current().attrs["texture_spatial_limit"]
 
+    from tvm.tir import expr
+
+    if (
+        isinstance(shape[0], expr.SizeVar)
+        or isinstance(shape[1], expr.SizeVar)
+        or isinstance(shape[2], expr.SizeVar)
+        or isinstance(shape[3], expr.SizeVar)
+    ):  # any_dim
+        print("Return global")
+        return ""
+
     if shape[0] * shape[1] * shape[2] < limit and shape[3] < limit:
         return "global.texture"
     elif shape[0] * shape[1] < limit and shape[2] * shape[3] < limit:

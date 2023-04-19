@@ -61,6 +61,16 @@ def _alter_conv2d_layout(attrs, inputs, tinfos, out_type):
     data_dtype = data_tensor.dtype
     out_dtype = out_type.dtype
 
+    # Check on dynamic shape
+    # TODO(echuraev): Probably it is a workaround for problem when we annotate tensors with dynamic shape to be loaded to buffer. When we get this error:
+    # >  File "/home/echuraev/Workspace/OctoML/tvm/python/tvm/relay/op/nn/_nn.py", line 1229, in conv_shape_func
+    # >    raise ValueError(
+    # > ValueError: Unsupported data/kernel layout: NCHW, OIHW4o
+    if any(isinstance(sh, tvm.tir.Any) for sh in data_tensor.shape) or any(
+        isinstance(sh, tvm.tir.Any) for sh in kernel_tensor.shape
+    ):
+        return None
+
     if isinstance(dispatch_ctx, autotvm.task.ApplyGraphBest):
         cfg = dispatch_ctx.query(target, None)
         workload = cfg.workload

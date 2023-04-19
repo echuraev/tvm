@@ -66,16 +66,7 @@ class DialectRewriter : public transform::DeviceAwareExprMutator {
         mod_(std::move(mod)),
         host_virtual_device_(std::move(host_virtual_device)) {}
 
-  Function Rewrite(const Function& expr) {
-      //std::cout << " Memory Alloc Rewrite BEFORE:" << std::endl;
-      //std::cout << PrettyPrint(expr) << std::endl;
-      //std::cout << " Memory Alloc Rewrite BEFORE!" << std::endl;
-      auto tmp = Downcast<Function>(Mutate(expr));
-      //std::cout << " Memory Alloc Rewrite AFTER:" << std::endl;
-      //std::cout << PrettyPrint(tmp) << std::endl;
-      //std::cout << " Memory Alloc Rewrite AFTER!" << std::endl;
-      return tmp;
-  }
+  Function Rewrite(const Function& expr) { return Downcast<Function>(Mutate(expr)); }
 
  private:
   using ExprMutator::VisitExpr_;
@@ -147,9 +138,7 @@ class DialectRewriter : public transform::DeviceAwareExprMutator {
     Call call = GetRef<Call>(call_node);
     VLOG(1) << "converting lowered call to DPS:" << std::endl << PrettyPrint(call);
 
-    //std::cout << "\n\n Before get vd: \n" << PrettyPrint(call) << "\n" << std::endl;
     VirtualDevice virtual_device = GetVirtualDevice(call);
-    //std::cout << "\n\n After get vd: \n" << PrettyPrint(virtual_device) << "\n" << std::endl;
     ICHECK(!virtual_device->IsFullyUnconstrained());
     ICHECK(!scopes_.empty())
         << "Calls out of a let block are not supported, do you forget to transform "
@@ -197,7 +186,6 @@ class DialectRewriter : public transform::DeviceAwareExprMutator {
     // Handle ordinary primitive calls.
     Array<Expr> outputs;
     for (size_t i = 0; i < out_types.size(); ++i) {
-        //std::cout << " Before MakeStaticAllocation, vd = " << PrettyPrint(virtual_device) << std::endl;
       outputs.push_back(
           MakeStaticAllocation(&scope, out_types[i], virtual_device, std::to_string(i)));
     }
@@ -272,9 +260,8 @@ class DialectRewriter : public transform::DeviceAwareExprMutator {
     Expr alignment = ComputeAlignment(type->dtype);
     // Run type inference later to get the correct type.
     Var var("storage_" + name_hint, Type(nullptr));
-      std::cout << "\n\n\n\n\n2. SHAPE: " << shape << ", size: " << size << "\nvd: " << virtual_device << "\n\n\n\n\n" << std::endl;
-    //Expr value = AllocStorage(size, alignment, virtual_device, type->dtype);
-    Expr value = AllocTextureStorage(size, shape, alignment, virtual_device, type->dtype);
+    Expr value = AllocStorage(size, alignment, virtual_device, type->dtype);
+    //Expr value = AllocTextureStorage(size, shape, alignment, virtual_device, type->dtype);
     auto sto = scope->Push(var, MaybeOnDeviceFixed(value, virtual_device));
 
     // TODO(@jroesch): There is a bug with typing based on the constant shape.
@@ -380,9 +367,8 @@ class DialectRewriter : public transform::DeviceAwareExprMutator {
       // Alignment is directly captured in the instruction so don't wrap in "on_device".
       auto alignment = ComputeAlignment(out_type->dtype);
       Var sto_var("storage_" + std::to_string(i), Type(nullptr));
-      std::cout << "\n\n\n\n\nSHAPE: " << out_shape << ", size: " << size << "\nvd: " << virtual_device << "\n\n\n\n\n" << std::endl;
-      //auto val = AllocStorage(size, alignment, virtual_device, out_type->dtype);
-      auto val = AllocTextureStorage(size, out_shape, alignment, virtual_device, out_type->dtype);
+      auto val = AllocStorage(size, alignment, virtual_device, out_type->dtype);
+      //auto val = AllocTextureStorage(size, out_shape, alignment, virtual_device, out_type->dtype);
       storages.push_back(scope->Push(sto_var, MaybeOnDeviceFixed(val, virtual_device)));
     }
 
