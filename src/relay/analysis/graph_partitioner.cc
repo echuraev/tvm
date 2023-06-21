@@ -220,6 +220,88 @@ size_t GraphPartitioner::CountFusedNodesWithNewChild(IndexedForwardGraph::Node* 
   return target->FindRoot()->num_nodes + CountNodesUptoSink_(child, dom_parent);
 }
 
+size_t GraphPartitioner::CountAdditionalArgs_(const TensorTypeNode* ttype, bool with_strides) {
+  size_t any_dims = 0;
+  for (const auto& dim : ttype->shape) {
+    if (dim.as<AnyNode>()) {
+      any_dims++;
+    }
+  }
+  if (with_strides && any_dims > 0) any_dims += ttype->shape.size();
+  return any_dims;
+}
+
+size_t GraphPartitioner::CountArgs_(const tvm::Object* child, const tvm::Object* till_node) {
+  if (child == till_node) {
+    // Calculate number of output arguments
+    if (auto call_node = GetRef<ObjectRef>(child).as<CallNode>()) {
+      if (const auto* ttype = call_node->checked_type().as<TensorTypeNode>()) {
+        return CountAdditionalArgs_(ttype) + 1;
+      }
+    }
+    return 1;
+  }
+  if (argsMap_.count(child)) {
+    return argsMap_[child];
+  }
+  size_t args_num = 0;
+  if (auto call_node = GetRef<ObjectRef>(child).as<CallNode>()) {
+    for (auto& it : call_node->args) {
+      if (it.as<CallNode>() || it.as<TupleNode>()) {
+        args_num += CountArgs_(it.get(), till_node);
+      } else if (it.as<VarNode>() || it.as<TupleGetItemNode>()) {
+        args_num++;
+        if (const auto* ttype = it->checked_type().as<TensorTypeNode>()) {
+          args_num += CountAdditionalArgs_(ttype);
+        }
+      }
+    }
+  } else if (GetRef<ObjectRef>(child).as<VarNode>() ||
+             GetRef<ObjectRef>(child).as<TupleGetItemNode>()) {
+    args_num++;
+    if (const auto* ttype =
+            GetRef<ObjectRef>(child).as<ExprNode>()->checked_type().as<TensorTypeNode>()) {
+      args_num += CountAdditionalArgs_(ttype);
+    }
+  } else if (auto tuple_node = GetRef<ObjectRef>(child).as<TupleNode>()) {
+    for (const auto& it : tuple_node->fields) {
+      args_num++;
+      args_num += CountArgs_(it.get(), till_node);
+    }
+  }
+  argsMap_[child] = args_num;
+  return args_num;
+}
+
+size_t GraphPartitioner::CountArgsLimit_(const IndexedForwardGraph::Node* child) {
+  auto* outputs_list = child->outputs.head;
+  size_t output_args = 0;
+  while (outputs_list != nullptr) {
+    output_args++;
+    if (auto call_node = GetRef<ObjectRef>(outputs_list->value.node->ref).as<CallNode>()) {
+      if (const auto* ttype = call_node->checked_type().as<TensorTypeNode>()) {
+        output_args += CountAdditionalArgs_(ttype, false);
+      }
+    }
+    outputs_list = outputs_list->next;
+  }
+  return (max_function_args_ > output_args) ? max_function_args_ - output_args : 0;
+}
+
+size_t GraphPartitioner::CountFusedArgs(IndexedForwardGraph::Node* child,
+                                        IndexedForwardGraph::Node* till_node) {
+  const tvm::Object* till_node_ref = (till_node != nullptr) ? till_node->ref : nullptr;
+  auto* outputs_list = child->outputs.head;
+  size_t res = 1;
+  while (outputs_list != nullptr) {
+    size_t output_args = 0;
+    output_args += CountArgs_(outputs_list->value.node->ref, till_node_ref);
+    res = std::max(res, output_args);
+    outputs_list = outputs_list->next;
+  }
+  return res;
+}
+
 void GraphPartitioner::InitGroups(const IndexedForwardGraph& graph) {
   groups_.resize(graph.post_dfs_order.size());
   for (size_t nid = 0; nid < groups_.size(); ++nid) {
@@ -238,6 +320,8 @@ void GraphPartitioner::InitGroups(const IndexedForwardGraph& graph) {
 void GraphPartitioner::RunFuse(const IndexedForwardGraph& graph,    //
                                const DominatorTree& post_dom_tree,  //
                                int phase) {
+  IndexedForwardGraph::Node* prev_node = nullptr;
+  argsMap_.clear();
   for (size_t nid = 0; nid < groups_.size(); ++nid) {
     // the group of current node has been specified already.
     auto* graph_node = graph.post_dfs_order[nid];
@@ -254,6 +338,15 @@ void GraphPartitioner::RunFuse(const IndexedForwardGraph& graph,    //
     // refuse the fusion if too many ops are going to be fused together
     if (CountFusedNodesWithNewChild(graph_node, dom_node->parent->gnode) > max_fuse_depth_)
       continue;
+    // refuse the fusion if too many arguments are going to be in fused function
+    auto limit = CountArgsLimit_(graph_node);
+    if (limit > 0) {
+      if (CountFusedArgs(graph_node, prev_node) > limit) {
+        argsMap_.clear();
+        prev_node = graph_node;
+        continue;
+      }
+    }
 
     if (phase == 2) {
       // Fuse injective ops into intermediate tuples, if any

@@ -78,7 +78,7 @@ class IndexedForwardGraph {
   std::vector<Node*> post_dfs_order;
 
   /*! \brief Dump the graph into string. */
-  void DebugDump() {
+  void DebugDump() const {
     std::ostringstream os;
     for (size_t i = 0; i < post_dfs_order.size(); ++i) {
       Node* node = post_dfs_order[i];
@@ -162,8 +162,12 @@ class DominatorTree {
  */
 class GraphPartitioner {
  public:
-  explicit GraphPartitioner(support::Arena* arena, int opt_level, size_t max_fuse_depth)
-      : arena_(arena), opt_level_(opt_level), max_fuse_depth_(max_fuse_depth) {}
+  explicit GraphPartitioner(support::Arena* arena, int opt_level, size_t max_fuse_depth,
+                            size_t max_function_args)
+      : arena_(arena),
+        opt_level_(opt_level),
+        max_fuse_depth_(max_fuse_depth),
+        max_function_args_(max_function_args) {}
   /*!
    * \brief Group as a union find data structure.
    */
@@ -205,10 +209,14 @@ class GraphPartitioner {
   int opt_level_;
   /*! \brief The maximum number of operations in one fused function */
   size_t max_fuse_depth_;
+  /*! \brief The maximum number of arguments in one fused function */
+  size_t max_function_args_;
   /*! \brief The internal groups. */
   std::vector<Group*> groups_;
   /*! \brief internal field used for deduplication */
   std::unordered_set<IndexedForwardGraph::Node*> visited_;
+  /*! \brief internal field used for hashing arguments number for a node */
+  std::unordered_map<const tvm::Object*, size_t> argsMap_;
   // Internal implementation of CheckPath
   template <typename F>
   bool CheckPath_(IndexedForwardGraph::Node* src, IndexedForwardGraph::Node* sink, F fcond);
@@ -247,6 +255,9 @@ class GraphPartitioner {
   void CommitFuse(IndexedForwardGraph::Node* src, IndexedForwardGraph::Node* sink);
 
   size_t CountNodesUptoSink_(IndexedForwardGraph::Node* src, IndexedForwardGraph::Node* sink);
+  size_t CountAdditionalArgs_(const TensorTypeNode* ttype, bool with_strides = true);
+  size_t CountArgs_(const tvm::Object* child, const tvm::Object* till_node);
+  size_t CountArgsLimit_(const IndexedForwardGraph::Node* child);
 
   // Count the number of nodes in a fused subgraph if child is additionally fused.
   // dom_parent is already known to be a part of the subgraph.
@@ -256,6 +267,11 @@ class GraphPartitioner {
   // is important for correct calculation.
   size_t CountFusedNodesWithNewChild(IndexedForwardGraph::Node* child,
                                      IndexedForwardGraph::Node* dom_parent);
+  // Count the number of arguments in a fused subgraph if child is additionally fused.
+  // Calculation goes from child node till the till_node. If till_node is a
+  // nullptr then calculate arguments till the beginning of the graph.
+  size_t CountFusedArgs(IndexedForwardGraph::Node* child,
+                        IndexedForwardGraph::Node* till_node = nullptr);
 
   // Initialize the groups.
   void InitGroups(const IndexedForwardGraph& graph);

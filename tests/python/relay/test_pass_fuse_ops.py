@@ -624,6 +624,12 @@ def test_fuse_max():
 
     assert tvm.ir.structural_equal(zz, after)
 
+    with tvm.target.Target("opencl"):
+        with tvm.transform.PassContext(config={"relay.FuseOps.max_depth": max_fused_ops}):
+            cl_zz = run_opt_pass(z, transform.FuseOps())
+
+    assert tvm.ir.structural_equal(cl_zz, after)
+
 
 link_params = tvm.testing.parameter(False, True)
 
@@ -826,6 +832,124 @@ def test_fuse_softmax():
         ex = relay.create_executor("graph", mod=m, device=dev, target=tgt)
         result = ex.evaluate()(inp).numpy()
         tvm.testing.assert_allclose(result, ref, rtol=1e-4, atol=1e-4)
+
+
+target_name = tvm.testing.parameter("opencl", "metal", "cuda")
+shape_type = tvm.testing.parameter("dynamic", "static")
+
+
+def test_fuse_max_num_args(target_name, shape_type):
+    if shape_type == "dynamic":
+        shape = (tvm.tir.Any(), 20)
+        number_of_any_dims = 1
+    else:
+        shape = (10, 20)
+        number_of_any_dims = 0
+    ndims = len(shape)
+    ops_num = 300
+
+    def _base_func(name):
+        x = relay.var(name, shape=shape)
+        y = relay.add(x, relay.const(1, "float32"))
+        w = relay.exp(y)
+        return x, w
+
+    def before(n):
+        inp = []
+        out = []
+        for i in range(n):
+            x, w = _base_func(f"x{i}")
+            inp.append(x)
+            out.append(w)
+        w = out[0]
+        for i in range(len(out) - 1):
+            w = relay.add(w, out[i + 1])
+        return relay.Function(inp, w)
+
+    def after(n):
+        def create_base_funcs_sum(args_number, limit, prev=None):
+            added_args = 0
+            inputs = []
+            input_vars = []
+            additional_arg = 0 if prev is None else 1
+            res = None
+            for i in range(args_number + additional_arg):
+                inp, out = _base_func(f"p{i}")
+                if i == 1 and prev is not None:
+                    res = relay.add(inp, res)
+                    input_vars.append(relay.var(f"x{i}", shape=shape))
+                    inputs.append(inp)
+                    added_args += 1 + number_of_any_dims
+                    if number_of_any_dims > 0:
+                        added_args += ndims
+                    continue
+
+                curr_args = 1 + number_of_any_dims
+                if number_of_any_dims > 0:
+                    curr_args += ndims
+
+                if added_args + curr_args > limit:
+                    f = relay.Function(inputs, res)
+                    f = f.with_attr("Primitive", tvm.tir.IntImm("int32", 1))
+                    return i - additional_arg, input_vars, f
+
+                input_vars.append(relay.var(f"x{i}", shape=shape))
+                inputs.append(inp)
+                if res is None:
+                    res = out
+                else:
+                    res = relay.add(res, out)
+                added_args += curr_args
+            f = relay.Function(inputs, res)
+            f = f.with_attr("Primitive", tvm.tir.IntImm("int32", 1))
+            return args_number, input_vars, f
+
+        def create_accum_func(args_limit):
+            out = None
+            inputs = []
+            if args_limit == 0:
+                for i in range(n):
+                    inputs.append(relay.var(f"x{i}", shape=shape))
+                f = before(n)
+                f = f.with_attr("Primitive", tvm.tir.IntImm("int32", 1))
+                out = relay.Call(f, inputs)
+                return relay.Function(inputs, out)
+
+            added_args = 0
+            while added_args < n:
+                # When out is not none that means that one additional argument
+                # will be used for the result of previous fusing
+                args_number = n - added_args
+                a_num, inp, func = create_base_funcs_sum(args_number, args_limit, out)
+                added_args += a_num
+                inputs.append(inp[0])
+                if len(inp) > 1:
+                    if out is not None:
+                        inp[1] = out
+                    else:
+                        inputs.append(inp[1])
+                else:
+                    if out is not None:
+                        inp.append(out)
+                if len(inp) > 2:
+                    inputs.extend(inp[2:])
+                out = relay.Call(func, inp)
+            return relay.Function(inputs, out)
+
+        args_limit = tvm.target.Target.current().max_function_args - (
+            1 + number_of_any_dims
+        )  # one buffer with output
+        args_limit = max(args_limit, 0)
+        return create_accum_func(args_limit)
+
+    max_fused_ops = ops_num * 5
+    with tvm.target.Target(target_name):
+        with tvm.transform.PassContext(config={"relay.FuseOps.max_depth": max_fused_ops}):
+            fused = run_opt_pass(before(ops_num), transform.FuseOps())
+
+        expected = run_opt_pass(after(ops_num), transform.InferType())
+
+    assert tvm.ir.structural_equal(fused, expected)
 
 
 if __name__ == "__main__":
