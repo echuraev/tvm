@@ -828,5 +828,106 @@ def test_fuse_softmax():
         tvm.testing.assert_allclose(result, ref, rtol=1e-4, atol=1e-4)
 
 
+def test_fuse_max_complex():
+    """Test the constraint of number of nodes in op fusion."""
+    shape = (10, 20)
+    base_function_ops = 1
+
+    def _base_func(name):
+        x = relay.var(name, shape=shape)
+        w = relay.multiply(x, relay.const(2, "float32"))
+        return x, w
+
+    def before(n):
+        inp = []
+        out = []
+        for i in range(n):
+            x, w = _base_func(f"x{i}")
+            inp.append(x)
+            out.append(w)
+        w = out[0]
+        for i in range(len(out) - 1):
+            w = relay.add(w, out[i + 1])
+        return relay.Function(inp, w)
+
+    def expected(n, max_fused_ops):
+        def create_base_funcs_sum(args_number, limit, prev=None):
+            added_ops = 0
+            inputs = []
+            input_vars = []
+            additional_op = 0 if prev is None else 1
+            res = None
+            for i in range(args_number + additional_op):
+                inp, out = _base_func(f"p{i}")
+                if i == 1 and prev is not None:
+                    res = relay.add(inp, res)
+                    input_vars.append(relay.var(f"x{i}", shape=shape))
+                    inputs.append(inp)
+                    added_ops += 1
+                    continue
+
+                curr_ops = base_function_ops if res is None else base_function_ops + 1
+                if added_ops + curr_ops > limit:
+                    f = relay.Function(inputs, res)
+                    f = f.with_attr("Primitive", tvm.tir.IntImm("int32", 1))
+                    return i - additional_op, input_vars, f
+
+                input_vars.append(relay.var(f"x{i}", shape=shape))
+                inputs.append(inp)
+                if res is None:
+                    res = out
+                else:
+                    res = relay.add(res, out)
+                added_ops += curr_ops
+            f = relay.Function(inputs, res)
+            f = f.with_attr("Primitive", tvm.tir.IntImm("int32", 1))
+            return args_number, input_vars, f
+
+        def create_accum_func(max_fused_ops):
+            out = None
+            inputs = []
+
+            added_ops = 0
+            while added_ops < n:
+                # When out is not none that means that one additional argument
+                # will be used for the result of previous fusing
+                args_number = n - added_ops
+                a_num, inp, func = create_base_funcs_sum(args_number, max_fused_ops, out)
+                added_ops += a_num
+                inputs.append(inp[0])
+                if len(inp) > 1:
+                    if out is not None:
+                        inp[1] = out
+                    else:
+                        inputs.append(inp[1])
+                else:
+                    if out is not None:
+                        inp.append(out)
+                if len(inp) > 2:
+                    inputs.extend(inp[2:])
+                out = relay.Call(func, inp)
+            return relay.Function(inputs, out)
+        return create_accum_func(max_fused_ops)
+
+    number_of_fused_base_func = 2
+    # Here `base_function_ops + 1` because if we want to fuse N base functions
+    # into one function, then for each base function we will have
+    # additionally N-1 add operations +1 for previous result.
+    max_fused_ops = (base_function_ops + 1) * number_of_fused_base_func
+    n = 5
+    z = before(n)
+    after = run_opt_pass(expected(n, max_fused_ops), transform.InferType())
+
+    with tvm.transform.PassContext(config={"relay.FuseOps.max_depth": max_fused_ops}):
+        zz = run_opt_pass(z, transform.FuseOps())
+
+    print("-" * 10)
+    print(zz)
+    print("-" * 10)
+    print("+" * 10)
+    print(after)
+    print("+" * 10)
+    assert tvm.ir.structural_equal(zz, after)
+
 if __name__ == "__main__":
     tvm.testing.main()
