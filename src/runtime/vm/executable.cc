@@ -183,7 +183,7 @@ std::string Executable::GetConstants() const {
     const auto& constant = constants[i];
     auto ndarray = Downcast<NDArray>(constant);
     oss << "VM Const[" << i
-        << "]: " << RuntimeObject2String(ndarray, virtual_devices[host_device_index]->ToDevice())
+        << "]: " << RuntimeObject2String(ndarray, virtual_devices[host_device_index].first)
         << " on device index " << const_device_indexes[i] << std::endl;
   }
   return oss.str();
@@ -192,9 +192,9 @@ std::string Executable::GetConstants() const {
 std::string Executable::GetVirtualDevices() const {
   std::ostringstream oss;
   for (size_t i = 0; i < virtual_devices.size(); ++i) {
-    const auto& device = virtual_devices[i];
-    oss << "VM VirtualDevice[" << i << "]: device type " << device->device_type() << ", id "
-        << device->virtual_device_id << " and mem_scope " << device->memory_scope << std::endl;
+    const auto& [device, scope] = virtual_devices[i];
+    oss << "VM VirtualDevice[" << i << "]: device type " << device.device_type << ", id "
+        << device.device_id << " and mem_scope " << scope << std::endl;
   }
   return oss.str();
 }
@@ -307,8 +307,7 @@ TVMByteArray Executable::Save() {
 }
 
 void Executable::SaveVirtualDevicesSection(dmlc::Stream* strm) {
-  // TODO: Add write for VD
-  //strm->Write(virtual_devices);
+  strm->Write(virtual_devices);
   strm->Write(host_device_index);
 }
 
@@ -796,8 +795,7 @@ runtime::Module Executable::Load(const std::string& code, const runtime::Module 
 }
 
 void Executable::LoadVirtualDevicesSection(dmlc::Stream* strm) {
-  // TODO: Add read for VD
-  //STREAM_CHECK(strm->Read(&virtual_devices), "virtual_device");
+  STREAM_CHECK(strm->Read(&virtual_devices), "virtual_device");
   STREAM_CHECK(strm->Read(&host_device_index), "virtual_device");
   ICHECK(host_device_index >= 0 && host_device_index < static_cast<int>(virtual_devices.size()));
 }

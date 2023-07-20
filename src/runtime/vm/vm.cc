@@ -79,9 +79,6 @@ inline ObjectRef CopyTo(ObjectRef src, const DLDevice& dev) {
       VLOG(2) << "copying from " << nd_array->device.device_type << "["
               << nd_array->device.device_id << "] to " << dev.device_type << "[" << dev.device_id
               << "]";
-      //std::cout << "copying from " << nd_array->device.device_type << "["
-      //        << nd_array->device.device_id << "] to " << dev.device_type << "[" << dev.device_id
-      //        << "]" << std::endl;
       return nd_array.CopyTo(dev);
     }
     return src;
@@ -110,9 +107,6 @@ inline ObjectRef CopyTo(ObjectRef src, const DLDevice& dev, String mem_scope) {
       VLOG(2) << "copying from " << nd_array->device.device_type << "["
               << nd_array->device.device_id << "] to " << dev.device_type << "[" << dev.device_id
               << "]";
-      //std::cout << "copying from " << nd_array->device.device_type << "["
-      //        << nd_array->device.device_id << "] to " << dev.device_type << "[" << dev.device_id
-      //        << "]" << std::endl;
       return nd_array.CopyTo(dev, mem_scope);
     }
     return src;
@@ -566,7 +560,7 @@ void VirtualMachine::Init(const std::vector<Device>& physical_devices,
   for (size_t device_index = 0; device_index < num_virtual_devices; ++device_index) {
     // We'll retain the legacy behaviour and just match by device type.
     // TODO(mbs): Generalize.
-    DLDeviceType virtual_device_type = exec_->virtual_devices[device_index]->device_type();
+    DLDeviceType virtual_device_type = exec_->virtual_devices[device_index].first.device_type;
     auto itr = std::find_if(physical_devices.begin(), physical_devices.end(),
                             [virtual_device_type](const Device& physical_device) {
                               return physical_device.device_type == virtual_device_type;
@@ -694,7 +688,6 @@ void VirtualMachine::RunLoop(const std::vector<Index>& output_tensor_reg_indices
         if (!const_pool_[instr.const_index].defined()) {
           //Device dev = GetDevice(instr.device_index);
           Device dev = GetDevice(exec_->const_device_indexes[instr.const_index]);
-    //std::cout << "runLoop, LoadConst, const_index: " << instr.const_index << ", dev_index: " << dev.device_id << ", instr.dev_index: " << instr.device_index << std::endl;
           const_pool_[instr.const_index] = CopyTo(constant_obj, dev, MemScopeToStr(instr.mem_scope));
         }
         WriteRegister(instr.dst, const_pool_[instr.const_index]);
@@ -864,11 +857,6 @@ void VirtualMachine::RunLoop(const std::vector<Index>& output_tensor_reg_indices
         VLOG(2) << "allocating with allocation_size=" << size << ", alignment=" << alignment
                 << ", dtype_hint=" << DLDataType2String(instr.alloc_storage.dtype_hint)
                 << ", device_index=" << instr.alloc_storage.device_index;
-        //std::cout << "allocating with allocation_size=" << size << ", alignment=" << alignment
-        //        << ", dtype_hint=" << DLDataType2String(instr.alloc_storage.dtype_hint)
-        //        << ", device_index=" << instr.alloc_storage.device_index
-        //        << ", ndim: " << instr.alloc_storage.ndim
-        //        << std::endl;
 
         storage_obj->buffer = allocator->Alloc(size, alignment, instr.alloc_storage.dtype_hint);
         Storage storage(storage_obj);
@@ -888,11 +876,6 @@ void VirtualMachine::RunLoop(const std::vector<Index>& output_tensor_reg_indices
         VLOG(2) << "allocating with allocation_size=" << size << ", alignment=" << alignment
                 << ", dtype_hint=" << DLDataType2String(instr.alloc_texture_storage.dtype_hint)
                 << ", device_index=" << instr.alloc_texture_storage.device_index;
-        //std::cout << "allocating with allocation_size=" << size << ", alignment=" << alignment
-        //        << ", dtype_hint=" << DLDataType2String(instr.alloc_storage.dtype_hint)
-        //        << ", device_index=" << instr.alloc_storage.device_index
-        //        << ", ndim: " << instr.alloc_storage.ndim
-        //        << std::endl;
 
         storage_obj->buffer = allocator->Alloc(instr.alloc_texture_storage.ndim, instr.alloc_texture_storage.shape, instr.alloc_texture_storage.dtype_hint, MemScopeToStr(instr.alloc_texture_storage.scope));
         Storage storage(storage_obj);
@@ -964,7 +947,7 @@ void VirtualMachine::RunLoop(const std::vector<Index>& output_tensor_reg_indices
         ICHECK_EQ(actual_src_dev.device_type, inst_src_dev.device_type);
         ICHECK_EQ(actual_src_dev.device_id, inst_src_dev.device_id);
         Device dst_dev = GetDevice(instr.device_copy.dst_device_index);
-        auto mem_scope = exec_->virtual_devices[instr.device_copy.dst_device_index]->memory_scope;
+        auto mem_scope = exec_->virtual_devices[instr.device_copy.dst_device_index].second;
 
         NDArray dst_data = src_data.CopyTo(dst_dev, mem_scope);
         WriteRegister(instr.dst, dst_data);

@@ -102,7 +102,6 @@ Expr AllocTextureStorage(Expr size, Expr shape, Expr alignment, VirtualDevice vi
   attrs->dtype = dtype_hint;
   attrs->virtual_device = std::move(virtual_device);
   static const Op& op = Op::Get("memory.alloc_texture_storage");
-  std::cout << " >>>> AllocTextureStorage, virtual_device: " << PrettyPrint(attrs->virtual_device) << std::endl;
   return Call(op, {std::move(size), std::move(shape), std::move(alignment)}, Attrs(std::move(attrs)), {});
 }
 

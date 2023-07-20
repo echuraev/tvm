@@ -260,7 +260,6 @@ class DialectRewriter : public transform::DeviceAwareExprMutator {
     Expr alignment = ComputeAlignment(type->dtype);
     // Run type inference later to get the correct type.
     Var var("storage_" + name_hint, Type(nullptr));
-    std::cout << "VD scope: " << virtual_device->memory_scope << std::endl;
     Expr value;
     if (virtual_device->memory_scope.empty() || virtual_device->memory_scope == "global")
         value = AllocStorage(size, alignment, virtual_device, type->dtype);

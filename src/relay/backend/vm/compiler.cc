@@ -245,7 +245,6 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
 
   VMFunction Compile(const GlobalVar& var, const Function& func) {
     VLOG(1) << "Compiling:" << std::endl << PrettyPrint(func);
-    //std::cout << "Compiling:" << std::endl << PrettyPrint(func) << std::endl;
     std::vector<Index> param_device_indexes;
     if (IsClosure(func)) {
       // After lifting we'll have functions of the form:
@@ -371,8 +370,6 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     auto con = GetRef<Constant>(const_node);
     auto vd = GetVirtualDevice(con);
     Index device_index = GetDeviceIndex(vd);
-    //device_index = 3;
-    //std::cout << "VisitExpr_(const ConstantNode* const_node), node: " << PrettyPrint(con) << ", dev_index: " << device_index << std::endl;
     VLOG(2) << "constant[" << const_index << "] on device[" << device_index << "]";
     context_->const_device_indexes.push_back(device_index);
     context_->constants.push_back(const_node->data);
@@ -626,9 +623,9 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
                    auto const_shape = AsIgnoringOnDevice<ConstantNode>(args[1]);
 
                    ICHECK(const_shape);  // Always a literal.
-                     NDArray shape = const_shape->data;
-                     // TODO(@jroesch): we need to get an RFC done to standarize shape dtype
-                     std::vector<int64_t> raw_shape = ToAllocTensorShape(shape);
+                   NDArray shape = const_shape->data;
+                   // TODO(@jroesch): we need to get an RFC done to standarize shape dtype
+                   std::vector<int64_t> raw_shape = ToAllocTensorShape(shape);
 
                    ICHECK(args[2].as<ConstantNode>());  // Always a literal.
                    NDArray alignment_arr = args[2].as<ConstantNode>()->data;
@@ -643,10 +640,10 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
                    ICHECK(alloc_attrs != nullptr) << "must be the AllocStorage attrs";
                    auto dtype = alloc_attrs->dtype;
 
-                   Emit(Instruction::AllocTextureStorage(size_register, alignment, dtype,
-                                                  GetDeviceIndex(alloc_attrs->virtual_device),
-                                                  raw_shape.size(), raw_shape, StrToMemScope(alloc_attrs->virtual_device->memory_scope),
-                                                  NewRegister()));
+                   Emit(Instruction::AllocTextureStorage(
+                       size_register, alignment, dtype, GetDeviceIndex(alloc_attrs->virtual_device),
+                       raw_shape.size(), raw_shape,
+                       StrToMemScope(alloc_attrs->virtual_device->memory_scope), NewRegister()));
                  })
           .Match("vm.shape_of",
                  [this](const Array<Expr>& args, const Attrs& attrs, const Array<Type>& type_arg) {
@@ -970,7 +967,10 @@ void VMCompiler::LowerImpl(IRModule mod) {
   for (const auto& virtual_device : context_.virtual_devices_) {
     ICHECK(!virtual_device->IsFullyUnconstrained());
     ICHECK_GT(virtual_device->device_type(), 0);
-    exec_->virtual_devices.push_back(virtual_device);
+    exec_->virtual_devices.push_back(
+        std::make_pair(Device{/*device_type=*/virtual_device->device_type(),
+                              /*device_id=*/virtual_device->virtual_device_id},
+                       virtual_device->memory_scope));
   }
   exec_->host_device_index = kHostDeviceIndex;
 
