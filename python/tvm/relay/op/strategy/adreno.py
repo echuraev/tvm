@@ -231,11 +231,11 @@ def schedule_injective_adreno(attrs, outs, target):
         return topi.adreno.schedule_injective(outs)
 
 
-@schedule_reduce.register(["adreno"])
-def schedule_reduce_adreno(attrs, outs, target):
-    """schedule reduction ops for adreno GPU"""
-    with target:
-        return topi.adreno.schedule_reduce(outs)
+#@schedule_reduce.register(["adreno"])
+#def schedule_reduce_adreno(attrs, outs, target):
+#    """schedule reduction ops for adreno GPU"""
+#    with target:
+#        return topi.adreno.schedule_reduce(outs)
 
 
 @schedule_adaptive_pool.register(["adreno"])
