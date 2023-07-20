@@ -113,6 +113,7 @@ class NDArray : public ObjectRef {
    * \return The array under another device.
    */
   inline NDArray CopyTo(const Device& dev) const;
+  inline NDArray CopyTo(const Device& dev, String mem_scope) const;
   /*!
    * \brief Load NDArray from stream
    * \param stream The input data stream
@@ -402,6 +403,14 @@ inline NDArray NDArray::CopyTo(const Device& dev) const {
   ICHECK(data_ != nullptr);
   const DLTensor* dptr = operator->();
   NDArray ret = Empty(ShapeTuple(dptr->shape, dptr->shape + dptr->ndim), dptr->dtype, dev);
+  this->CopyTo(ret);
+  return ret;
+}
+
+inline NDArray NDArray::CopyTo(const Device& dev, String mem_scope) const {
+  ICHECK(data_ != nullptr);
+  const DLTensor* dptr = operator->();
+  NDArray ret = Empty(ShapeTuple(dptr->shape, dptr->shape + dptr->ndim), dptr->dtype, dev, mem_scope);
   this->CopyTo(ret);
   return ret;
 }

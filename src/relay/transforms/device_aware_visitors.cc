@@ -78,6 +78,11 @@ VirtualDevice LexicalOnDeviceMixin::GetVirtualDevice(const Expr& expr) const {
     }
   } else {
     if (!expr_virtual_devices_.empty()) {
+        //std::cout << "\n\nvirtual_devices: expr_virtual_devices_ size: " << expr_virtual_devices_.size() << ": \n";
+        //for (int i = 0; i < expr_virtual_devices_.size(); ++i) {
+        //    std::cout << "\t" << i << ". " << PrettyPrint(expr_virtual_devices_[i]) << std::endl;
+        //}
+        //std::cout << "\n" << std::endl;
       // Use the currently in-scope device type.
       return expr_virtual_devices_.back();
     }
@@ -266,6 +271,9 @@ Expr DeviceAwareExprMutator::VisitExpr_(const CallNode* call_node) {
   OnDeviceProps props = GetOnDeviceProps(call_node);
   if (props.body.defined() && props.is_fixed()) {
     // Entering lexical scope of fixed "on_device" call.
+    //std::cout << "\n\n 2222. PUSH_VIRTUAL_DEVICE >>> DeviceAwareExprMutator::VisitExpr_(const CallNode* call_node): \n" << PrettyPrint(props.virtual_device) << "\ncall_node:\n" << PrettyPrint(GetRef<Call>(call_node)) 
+    //    << "\nprobs.body:\n" << PrettyPrint(props.body)
+    //    << "\n" << std::endl;
     PushVirtualDevice(props.virtual_device);
     Expr expr = VisitExpr(props.body);
     // Leaving lexical scope of "on_device" call.

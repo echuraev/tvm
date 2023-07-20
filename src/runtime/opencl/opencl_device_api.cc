@@ -230,6 +230,7 @@ void* OpenCLWorkspace::AllocDataSpace(Device dev, size_t size, size_t alignment,
   if (size == 0) {
     size = 1;
   }
+  std::cout << " >>> OpenCL: Alloc buffer!" << std::endl;
   desc->buffer =
       clCreateBuffer(this->contexts[platform], CL_MEM_CREATE_FLAGS, size, nullptr, &err_code);
   desc->layout = cl::BufferDescriptor::MemoryLayout::kBuffer1D;
@@ -277,6 +278,7 @@ void OpenCLWorkspace::FreeDataSpace(Device dev, void* ptr) {
 
 cl_mem OpenCLWorkspace::AllocTexture(Device dev, size_t width, size_t height,
                                      DLDataType type_hint) {
+  std::cout << " >>> OpenCL: Alloc Texture!" << std::endl;
   this->Init();
   cl_device_id device_id = GetCLDeviceID(dev.device_id);
   auto platform = device_to_platform[device_id];

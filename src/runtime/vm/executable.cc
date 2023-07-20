@@ -183,7 +183,7 @@ std::string Executable::GetConstants() const {
     const auto& constant = constants[i];
     auto ndarray = Downcast<NDArray>(constant);
     oss << "VM Const[" << i
-        << "]: " << RuntimeObject2String(ndarray, virtual_devices[host_device_index])
+        << "]: " << RuntimeObject2String(ndarray, virtual_devices[host_device_index]->ToDevice())
         << " on device index " << const_device_indexes[i] << std::endl;
   }
   return oss.str();
@@ -193,8 +193,8 @@ std::string Executable::GetVirtualDevices() const {
   std::ostringstream oss;
   for (size_t i = 0; i < virtual_devices.size(); ++i) {
     const auto& device = virtual_devices[i];
-    oss << "VM VirtualDevice[" << i << "]: device type " << device.device_type << " and id "
-        << device.device_id << std::endl;
+    oss << "VM VirtualDevice[" << i << "]: device type " << device->device_type() << ", id "
+        << device->virtual_device_id << " and mem_scope " << device->memory_scope << std::endl;
   }
   return oss.str();
 }
@@ -307,7 +307,8 @@ TVMByteArray Executable::Save() {
 }
 
 void Executable::SaveVirtualDevicesSection(dmlc::Stream* strm) {
-  strm->Write(virtual_devices);
+  // TODO: Add write for VD
+  //strm->Write(virtual_devices);
   strm->Write(host_device_index);
 }
 
@@ -599,6 +600,25 @@ VMInstructionSerializer SerializeInstruction(const Instruction& instr) {
       fields.push_back(instr.dst);
       break;
     }
+    case Opcode::AllocTextureStorage: {
+      fields.push_back(instr.alloc_texture_storage.allocation_size);
+      fields.push_back(instr.alloc_texture_storage.alignment);
+      // Save `DLDataType` and the dst register.
+      const auto& dtype = instr.alloc_texture_storage.dtype_hint;
+      fields.push_back(dtype.code);
+      fields.push_back(dtype.bits);
+      fields.push_back(dtype.lanes);
+      fields.push_back(instr.alloc_texture_storage.device_index);
+      fields.push_back(instr.alloc_texture_storage.ndim);
+      fields.push_back(MemScopeToInt(instr.alloc_texture_storage.scope));
+      fields.push_back(instr.dst);
+
+      // Save the shape of the tensor.
+      // Note that this field is rotated to the end of the list.
+      fields.insert(fields.end(), instr.alloc_texture_storage.shape,
+                    instr.alloc_texture_storage.shape + instr.alloc_texture_storage.ndim);
+      break;
+    }
     case Opcode::AllocADT: {
       // Number of fields = 3 + instr.num_fields
       fields.assign({instr.constructor_tag, instr.num_fields, instr.dst});
@@ -639,8 +659,8 @@ VMInstructionSerializer SerializeInstruction(const Instruction& instr) {
       break;
     }
     case Opcode::LoadConst: {
-      // Number of fields = 2
-      fields.assign({instr.const_index, instr.dst});
+      // Number of fields = 3
+      fields.assign({instr.const_index, MemScopeToInt(instr.mem_scope), instr.dst});
       break;
     }
     case Opcode::LoadConsti: {
@@ -776,7 +796,8 @@ runtime::Module Executable::Load(const std::string& code, const runtime::Module 
 }
 
 void Executable::LoadVirtualDevicesSection(dmlc::Stream* strm) {
-  STREAM_CHECK(strm->Read(&virtual_devices), "virtual_device");
+  // TODO: Add read for VD
+  //STREAM_CHECK(strm->Read(&virtual_devices), "virtual_device");
   STREAM_CHECK(strm->Read(&host_device_index), "virtual_device");
   ICHECK(host_device_index >= 0 && host_device_index < static_cast<int>(virtual_devices.size()));
 }
@@ -925,6 +946,26 @@ Instruction DeserializeInstruction(const VMInstructionSerializer& instr) {
 
       return Instruction::AllocStorage(allocation_size, alignment, dtype, device_type, dst);
     }
+    case Opcode::AllocTextureStorage: {
+      // Number of fields = 10
+      DCHECK_GE(instr.fields.size(), 10U);
+      Index allocation_size = instr.fields[0];
+      Index alignment = instr.fields[1];
+
+      DLDataType dtype;
+      dtype.code = instr.fields[2];
+      dtype.bits = instr.fields[3];
+      dtype.lanes = instr.fields[4];
+
+      Index device_type = instr.fields[5];
+      Index ndim = instr.fields[6];
+      MemScope scope = IdxToMemScope(instr.fields[7]);
+      RegName dst = instr.fields[8];
+
+      std::vector<Index> shape = ExtractFields(instr.fields, 9, ndim);
+
+      return Instruction::AllocTextureStorage(allocation_size, alignment, dtype, device_type, ndim, shape, scope, dst);
+    }
     case Opcode::If: {
       // Number of fields = 4
       DCHECK_EQ(instr.fields.size(), 4U);
@@ -961,8 +1002,8 @@ Instruction DeserializeInstruction(const VMInstructionSerializer& instr) {
     }
     case Opcode::LoadConst: {
       // Number of fields = 2
-      DCHECK_EQ(instr.fields.size(), 2U);
-      return Instruction::LoadConst(instr.fields[0], instr.fields[1]);
+      DCHECK_EQ(instr.fields.size(), 3U);
+      return Instruction::LoadConst(instr.fields[0], IdxToMemScope(instr.fields[1]), instr.fields[2]);
     }
     case Opcode::LoadConsti: {
       // Number of fields = 2

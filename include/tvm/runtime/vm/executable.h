@@ -30,6 +30,7 @@
 #include <tvm/runtime/object.h>
 #include <tvm/runtime/packed_func.h>
 #include <tvm/runtime/vm/bytecode.h>
+#include <tvm/target/virtual_device.h>
 
 #include <map>
 #include <string>
@@ -264,7 +265,7 @@ class TVM_DLL Executable : public ModuleNode {
    * \brief The (compile-time, virtual) devices corresponding to each device index.
    * Currently we only support at most one device per device type.
    */
-  std::vector<Device> virtual_devices;
+  std::vector<VirtualDevice> virtual_devices;
   /*!
    * \brief The device index corresponding to the 'host' device. That will hold and evaluate
    * shape-related data and code.

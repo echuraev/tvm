@@ -224,6 +224,9 @@ cl_kernel OpenCLModuleNode::InstallKernel(cl::OpenCLWorkspace* w, cl::OpenCLThre
     // create program
     if (fmt_ == "cl") {
       const char* s = parsed_kernels_[func_name].c_str();
+      std::cout << " >>> OpenCL kernel:" << std::endl;
+      std::cout << s << std::endl;
+      std::cout << " >>> OpenCL kernel!" << std::endl;
       size_t len = parsed_kernels_[func_name].length();
       cl_int err;
       programs_[func_name][device_id] =

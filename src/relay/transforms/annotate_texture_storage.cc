@@ -174,6 +174,8 @@ class StorageInfo : private transform::DeviceAwareExprVisitor {
             for (const auto& ttype : FlattenTupleType(fn->params[i]->checked_type())) {
               std::string scope = Scope(ttype->shape, GetVirtualDevice(GetRef<Expr>(call)));
               if (expr_attrib.as<Conv2DAttrs>() || expr_attrib.as<Conv2DWinogradAttrs>()) {
+                // TODO (echuraev): CanUseBuffers doesn't work for VM. fn->attrs doesn't contain
+                // attribute `kernel_layout`
                 if ((i == weights_pos) && !ttype->dtype.is_float16() &&
                     CanUseBuffers(call->args[i], ttype->shape, fn->attrs)) {
                   buffers_params.insert(fn->params[i]);
@@ -652,6 +654,17 @@ Expr AnnotateMemoryScopeExpr(const Expr& expr, const IRModule& mod) {
   } else {
     return expr;
   }
+  //if (storage_scope.size()) {
+  //  std::cout << " >>>> BEFORE ANNOTATE: \n"
+  //            << PrettyPrint(expr) << "\n >>>> BEFORE ANNOTATE" << std::endl;
+  //  auto ttt = RewriteVDStorageScopes(storage_scope).Rewrite(expr);
+  //  std::cout << " >>>> AFTER ANNOTATE: \n"
+  //            << PrettyPrint(ttt) << "\n >>>> AFTER ANNOTATE" << std::endl;
+  //  return ttt;
+  //} else {
+  //  std::cout << " >>>> NO ANNOTATE: \n" << PrettyPrint(expr) << "\n >>>> NO ANNOTATE" << std::endl;
+  //  return expr;
+  //}
 }
 
 namespace transform {
