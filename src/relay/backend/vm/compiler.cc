@@ -367,8 +367,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     NDArray data = const_node->data;
     size_t const_index = context_->constants.size();
     auto con = GetRef<Constant>(const_node);
-    auto vd = GetVirtualDevice(con);
-    Index device_index = GetDeviceIndex(vd);
+    Index device_index = GetDeviceIndex(GetVirtualDevice(con));
     VLOG(2) << "constant[" << const_index << "] on device[" << device_index << "]";
     context_->const_device_indexes.push_back(device_index);
     context_->constants.push_back(const_node->data);

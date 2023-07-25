@@ -68,7 +68,11 @@ bool AllocStorageRel(const Array<Type>& types, int num_inputs, const Attrs& attr
   ICHECK(tensor_type != nullptr);
   ICHECK_EQ(tensor_type->dtype, DataType::Int(64));
   ICHECK_EQ(tensor_type->shape.size(), 0);
-  // TODO: add shape handling
+
+  // Tensor shape
+  auto tt = types[1].as<TensorTypeNode>();
+  ICHECK(tt != nullptr) << "must be tensor type";
+
   auto align_type = types[2];
   auto align_ttype = align_type.as<TensorTypeNode>();
   ICHECK(align_ttype != nullptr);

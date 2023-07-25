@@ -629,7 +629,6 @@ void InstructionPrint(std::ostream& os, const Instruction& instr) {
          << instr.alloc_storage.alignment << " "
          << "[" << StrJoin<int64_t>(instr.alloc_storage.shape, 0, instr.alloc_storage.ndim) << "] "
          << DLDataType2String(instr.alloc_storage.dtype_hint) << " "
-         // TODO: add printing memory scope
          << instr.alloc_storage.device_index;
       break;
     }

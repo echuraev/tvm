@@ -261,17 +261,6 @@ class StorageInfo : private transform::DeviceAwareExprVisitor {
       int a1 = shape[1].as<IntImmNode>()->value;
       int a2 = shape[2].as<IntImmNode>()->value;
       int a3 = shape[3].as<IntImmNode>()->value;
-      ///auto node0 = shape[0].as<IntImmNode>();
-      ///auto node1 = shape[1].as<IntImmNode>();
-      ///auto node2 = shape[2].as<IntImmNode>();
-      ///auto node3 = shape[3].as<IntImmNode>();
-      ///if (!node0 || !node1 || !node2 || !node3) {
-      ///    return "global";
-      ///}
-      ///int a0 = node0->value;
-      ///int a1 = node1->value;
-      ///int a2 = node2->value;
-      ///int a3 = node3->value;
 
       int d3l = a0 * a1 * a2;
       int d3r = a3;
@@ -385,11 +374,10 @@ class StorageInfo : private transform::DeviceAwareExprVisitor {
     bool supports_texture_storage = false;
     // we need to verify only entry functions since one of entry op defines main schedule
     for (const auto& arg : call->args) {
-      if (!arg.as<VarNode>()) {// || arg.as<AnyNode>()) {
+      if (!arg.as<VarNode>()) {
         return false;
       }
     }
-    //return false;
     if (auto attrs = call->attrs.as<Conv2DAttrs>()) {
       if (attrs->data_layout == "NCHW4c" && attrs->kernel_layout == "OIHW4o") {
         supports_texture_storage = true;
@@ -426,6 +414,7 @@ class StorageInfo : private transform::DeviceAwareExprVisitor {
             auto node2 = ttype->shape[2].as<IntImmNode>();
             auto node3 = ttype->shape[3].as<IntImmNode>();
             auto node4 = ttype->shape[4].as<IntImmNode>();
+            // if tensor has any dimension then textures are not supported
             if (!node0 || !node1 || !node2 || !node3 || !node4) {
                 return false;
             }
@@ -674,17 +663,6 @@ Expr AnnotateMemoryScopeExpr(const Expr& expr, const IRModule& mod) {
   } else {
     return expr;
   }
-  //if (storage_scope.size()) {
-  //  std::cout << " >>>> BEFORE ANNOTATE: \n"
-  //            << PrettyPrint(expr) << "\n >>>> BEFORE ANNOTATE" << std::endl;
-  //  auto ttt = RewriteVDStorageScopes(storage_scope).Rewrite(expr);
-  //  std::cout << " >>>> AFTER ANNOTATE: \n"
-  //            << PrettyPrint(ttt) << "\n >>>> AFTER ANNOTATE" << std::endl;
-  //  return ttt;
-  //} else {
-  //  std::cout << " >>>> NO ANNOTATE: \n" << PrettyPrint(expr) << "\n >>>> NO ANNOTATE" << std::endl;
-  //  return expr;
-  //}
 }
 
 namespace transform {
