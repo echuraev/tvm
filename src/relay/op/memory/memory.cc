@@ -50,64 +50,17 @@ TVM_REGISTER_NODE_TYPE(AllocTensorAttrs);
 // The passing value in attrs and args doesn't seem super great.
 // We should consider a better solution, i.e the type relation
 // being able to see the arguments as well?
-Expr AllocStorage(Expr size, Expr alignment, VirtualDevice virtual_device, DataType dtype_hint) {
+Expr AllocStorage(Expr size, Expr shape, Expr alignment, VirtualDevice virtual_device, DataType dtype_hint) {
   auto attrs = make_object<AllocStorageAttrs>();
   attrs->dtype = dtype_hint;
   attrs->virtual_device = std::move(virtual_device);
   static const Op& op = Op::Get("memory.alloc_storage");
-  return Call(op, {std::move(size), std::move(alignment)}, Attrs(std::move(attrs)), {});
+  return Call(op, {std::move(size), std::move(shape), std::move(alignment)}, Attrs(std::move(attrs)), {});
 }
 
 TVM_REGISTER_GLOBAL("relay.op.memory._make.alloc_storage").set_body_typed(AllocStorage);
 
 bool AllocStorageRel(const Array<Type>& types, int num_inputs, const Attrs& attrs,
-                     const TypeReporter& reporter) {
-  ICHECK_EQ(types.size(), 3u);
-  auto size_type = types[0];
-  auto tensor_type = size_type.as<TensorTypeNode>();
-  ICHECK(tensor_type != nullptr);
-  ICHECK_EQ(tensor_type->dtype, DataType::Int(64));
-  ICHECK_EQ(tensor_type->shape.size(), 0);
-  auto align_type = types[1];
-  auto align_ttype = align_type.as<TensorTypeNode>();
-  ICHECK(align_ttype != nullptr);
-  ICHECK_EQ(align_ttype->dtype, DataType::Int(64));
-  ICHECK_EQ(align_ttype->shape.size(), 0);
-  auto mod = reporter->GetModule();
-  ICHECK(mod.defined());
-  auto storage_name = mod->GetGlobalTypeVar("Storage");
-  auto storage = TypeCall(storage_name, {});
-  reporter->Assign(types[2], storage);
-  return true;
-}
-
-RELAY_REGISTER_OP("memory.alloc_storage")
-    .describe(R"code(Explicitly allocate storage to be used by tensors.)code" TVM_ADD_FILELINE)
-    .set_num_inputs(2)
-    .add_argument("size", "Tensor", "The size of the storage to allocate.")
-    .add_argument("alignment", "Tensor", "The alignment of the storage.")
-    .add_type_rel("AllocStorage", AllocStorageRel)
-    .set_attrs_type_key("relay.attrs.AllocStorageAttrs")
-    .set_support_level(10)
-    .set_attr<TOpPattern>("TOpPattern", kOpaque)
-    .set_attr<TOpIsStateful>("TOpIsStateful", false)
-    .set_attr<TNonComputational>("TNonComputational", true)
-    .set_attr<FInferCorrectLayout>("FInferCorrectLayout", ElemwiseArbitraryLayout);
-
-// The passing value in attrs and args doesn't seem super great.
-// We should consider a better solution, i.e the type relation
-// being able to see the arguments as well?
-Expr AllocTextureStorage(Expr size, Expr shape, Expr alignment, VirtualDevice virtual_device, DataType dtype_hint) {
-  auto attrs = make_object<AllocStorageAttrs>();
-  attrs->dtype = dtype_hint;
-  attrs->virtual_device = std::move(virtual_device);
-  static const Op& op = Op::Get("memory.alloc_texture_storage");
-  return Call(op, {std::move(size), std::move(shape), std::move(alignment)}, Attrs(std::move(attrs)), {});
-}
-
-TVM_REGISTER_GLOBAL("relay.op.memory._make.alloc_texture_storage").set_body_typed(AllocTextureStorage);
-
-bool AllocTextureStorageRel(const Array<Type>& types, int num_inputs, const Attrs& attrs,
                      const TypeReporter& reporter) {
   ICHECK_EQ(types.size(), 4u);
   auto size_type = types[0];
@@ -129,13 +82,13 @@ bool AllocTextureStorageRel(const Array<Type>& types, int num_inputs, const Attr
   return true;
 }
 
-RELAY_REGISTER_OP("memory.alloc_texture_storage")
+RELAY_REGISTER_OP("memory.alloc_storage")
     .describe(R"code(Explicitly allocate storage to be used by tensors.)code" TVM_ADD_FILELINE)
     .set_num_inputs(3)
     .add_argument("size", "Tensor", "The size of the storage to allocate.")
     .add_argument("shape", "Tensor", "The shape of the storage to allocate.")
     .add_argument("alignment", "Tensor", "The alignment of the storage.")
-    .add_type_rel("AllocTextureStorage", AllocTextureStorageRel)
+    .add_type_rel("AllocStorage", AllocStorageRel)
     .set_attrs_type_key("relay.attrs.AllocStorageAttrs")
     .set_support_level(10)
     .set_attr<TOpPattern>("TOpPattern", kOpaque)

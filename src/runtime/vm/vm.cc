@@ -686,9 +686,8 @@ void VirtualMachine::RunLoop(const std::vector<Index>& output_tensor_reg_indices
         }
 
         if (!const_pool_[instr.const_index].defined()) {
-          //Device dev = GetDevice(instr.device_index);
-          Device dev = GetDevice(exec_->const_device_indexes[instr.const_index]);
-          const_pool_[instr.const_index] = CopyTo(constant_obj, dev, MemScopeToStr(instr.mem_scope));
+          auto& [dev, mem_scope] = exec_->virtual_devices[exec_->const_device_indexes[instr.const_index]];
+          const_pool_[instr.const_index] = CopyTo(constant_obj, dev, mem_scope);
         }
         WriteRegister(instr.dst, const_pool_[instr.const_index]);
         if (is_not_cached) {
@@ -857,27 +856,9 @@ void VirtualMachine::RunLoop(const std::vector<Index>& output_tensor_reg_indices
         VLOG(2) << "allocating with allocation_size=" << size << ", alignment=" << alignment
                 << ", dtype_hint=" << DLDataType2String(instr.alloc_storage.dtype_hint)
                 << ", device_index=" << instr.alloc_storage.device_index;
+        std::string mem_scope = exec_->virtual_devices[instr.alloc_storage.device_index].second;
 
-        storage_obj->buffer = allocator->Alloc(size, alignment, instr.alloc_storage.dtype_hint);
-        Storage storage(storage_obj);
-        WriteRegister(instr.dst, storage);
-        OpStopHook();
-        pc_++;
-        goto main_loop;
-      }
-      case Opcode::AllocTextureStorage: {
-        OpStartHook(instr);
-        auto size = LoadScalarInt(instr.alloc_texture_storage.allocation_size);
-        auto alignment = instr.alloc_texture_storage.alignment;
-
-        auto storage_obj = SimpleObjAllocator().make_object<StorageObj>();
-        Allocator* allocator = GetAllocator(instr.alloc_texture_storage.device_index);
-        ICHECK(allocator) << "Did you forget to init the VirtualMachine with devices?";
-        VLOG(2) << "allocating with allocation_size=" << size << ", alignment=" << alignment
-                << ", dtype_hint=" << DLDataType2String(instr.alloc_texture_storage.dtype_hint)
-                << ", device_index=" << instr.alloc_texture_storage.device_index;
-
-        storage_obj->buffer = allocator->Alloc(instr.alloc_texture_storage.ndim, instr.alloc_texture_storage.shape, instr.alloc_texture_storage.dtype_hint, MemScopeToStr(instr.alloc_texture_storage.scope));
+        storage_obj->buffer = allocator->Alloc(instr.alloc_storage.ndim, instr.alloc_storage.shape, instr.alloc_storage.dtype_hint, mem_scope);
         Storage storage(storage_obj);
         WriteRegister(instr.dst, storage);
         OpStopHook();
