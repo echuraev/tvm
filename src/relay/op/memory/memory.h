@@ -34,7 +34,8 @@
 namespace tvm {
 namespace relay {
 
-Expr AllocStorage(Expr size, Expr shape, Expr alignment, VirtualDevice virtual_device, DataType dtype_hint);
+Expr AllocStorage(Expr size, Expr alignment, VirtualDevice virtual_device, DataType dtype_hint);
+Expr AllocTextureStorage(Expr size, Expr shape, Expr alignment, VirtualDevice virtual_device, DataType dtype_hint);
 /*! \brief Returns the "memory.alloc_tensor" operator. */
 const Op& MemoryAllocTensorOp();
 Expr AllocTensor(Expr storage, Expr offset, Expr shape, DataType dtype,

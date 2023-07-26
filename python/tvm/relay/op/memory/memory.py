@@ -69,6 +69,28 @@ def alloc_storage(size, alignment, device, dtype_hint="float32"):
     return _make.alloc_storage(size, alignment, device, dtype_hint)
 
 
+def alloc_texture_storage(size, alignment, device, dtype_hint="float32"):
+    """Allocate a piece of tensor storage.
+
+    Parameters
+    ----------
+    size : tvm.relay.Expr
+        The size of the allocation.
+    alignment : tvm.relay.Expr
+        The alignment of the allocation.
+    device : tvm.runtime.Device
+        The device of the allocation.
+    dtype_hint : str
+        The dtype hint of the allocation.
+
+    Returns
+    -------
+    result : tvm.relay.Expr
+        The alloc_texture_storage expression.
+    """
+    return _make.alloc_texture_storage(size, alignment, device, dtype_hint)
+
+
 def flatten_tuple_type(ty):
     """Return a sequence of the types contained in the tuple type in order.
 
