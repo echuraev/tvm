@@ -596,26 +596,13 @@ VMInstructionSerializer SerializeInstruction(const Instruction& instr) {
       fields.push_back(dtype.bits);
       fields.push_back(dtype.lanes);
       fields.push_back(instr.alloc_storage.device_index);
-      fields.push_back(instr.dst);
-      break;
-    }
-    case Opcode::AllocTextureStorage: {
-      fields.push_back(instr.alloc_texture_storage.allocation_size);
-      fields.push_back(instr.alloc_texture_storage.alignment);
-      // Save `DLDataType` and the dst register.
-      const auto& dtype = instr.alloc_texture_storage.dtype_hint;
-      fields.push_back(dtype.code);
-      fields.push_back(dtype.bits);
-      fields.push_back(dtype.lanes);
-      fields.push_back(instr.alloc_texture_storage.device_index);
-      fields.push_back(instr.alloc_texture_storage.ndim);
-      fields.push_back(MemScopeToInt(instr.alloc_texture_storage.scope));
+      fields.push_back(instr.alloc_storage.ndim);
       fields.push_back(instr.dst);
 
       // Save the shape of the tensor.
       // Note that this field is rotated to the end of the list.
-      fields.insert(fields.end(), instr.alloc_texture_storage.shape,
-                    instr.alloc_texture_storage.shape + instr.alloc_texture_storage.ndim);
+      fields.insert(fields.end(), instr.alloc_storage.shape,
+                    instr.alloc_storage.shape + instr.alloc_storage.ndim);
       break;
     }
     case Opcode::AllocADT: {
@@ -659,7 +646,7 @@ VMInstructionSerializer SerializeInstruction(const Instruction& instr) {
     }
     case Opcode::LoadConst: {
       // Number of fields = 3
-      fields.assign({instr.const_index, MemScopeToInt(instr.mem_scope), instr.dst});
+      fields.assign({instr.const_index, instr.device_index, instr.dst});
       break;
     }
     case Opcode::LoadConsti: {
@@ -929,24 +916,8 @@ Instruction DeserializeInstruction(const VMInstructionSerializer& instr) {
       return Instruction::AllocClosure(clo_index, num_freevar, free_vars, dst);
     }
     case Opcode::AllocStorage: {
-      // Number of fields = 7
-      DCHECK_GE(instr.fields.size(), 7U);
-      Index allocation_size = instr.fields[0];
-      Index alignment = instr.fields[1];
-
-      DLDataType dtype;
-      dtype.code = instr.fields[2];
-      dtype.bits = instr.fields[3];
-      dtype.lanes = instr.fields[4];
-
-      Index device_type = instr.fields[5];
-      RegName dst = instr.fields[6];
-
-      return Instruction::AllocStorage(allocation_size, alignment, dtype, device_type, dst);
-    }
-    case Opcode::AllocTextureStorage: {
-      // Number of fields = 10
-      DCHECK_GE(instr.fields.size(), 10U);
+      // Number of fields = 9
+      DCHECK_GE(instr.fields.size(), 9U);
       Index allocation_size = instr.fields[0];
       Index alignment = instr.fields[1];
 
@@ -957,12 +928,10 @@ Instruction DeserializeInstruction(const VMInstructionSerializer& instr) {
 
       Index device_type = instr.fields[5];
       Index ndim = instr.fields[6];
-      MemScope scope = IdxToMemScope(instr.fields[7]);
-      RegName dst = instr.fields[8];
+      RegName dst = instr.fields[7];
+      std::vector<Index> shape = ExtractFields(instr.fields, 8, ndim);
 
-      std::vector<Index> shape = ExtractFields(instr.fields, 9, ndim);
-
-      return Instruction::AllocTextureStorage(allocation_size, alignment, dtype, device_type, ndim, shape, scope, dst);
+      return Instruction::AllocStorage(allocation_size, alignment, dtype, device_type, shape, dst);
     }
     case Opcode::If: {
       // Number of fields = 4
@@ -999,9 +968,9 @@ Instruction DeserializeInstruction(const VMInstructionSerializer& instr) {
       return Instruction::InvokeClosure(closure, args, dst);
     }
     case Opcode::LoadConst: {
-      // Number of fields = 2
+      // Number of fields = 3
       DCHECK_EQ(instr.fields.size(), 3U);
-      return Instruction::LoadConst(instr.fields[0], IdxToMemScope(instr.fields[1]), instr.fields[2]);
+      return Instruction::LoadConst(instr.fields[0], instr.fields[1], instr.fields[2]);
     }
     case Opcode::LoadConsti: {
       // Number of fields = 2

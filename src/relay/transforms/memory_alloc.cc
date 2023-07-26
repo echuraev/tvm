@@ -260,12 +260,8 @@ class DialectRewriter : public transform::DeviceAwareExprMutator {
     Expr alignment = ComputeAlignment(type->dtype);
     // Run type inference later to get the correct type.
     Var var("storage_" + name_hint, Type(nullptr));
-    Expr value;
-    if (virtual_device->memory_scope.empty() || virtual_device->memory_scope == "global")
-        value = AllocStorage(size, alignment, virtual_device, type->dtype);
-    else
-        value = AllocTextureStorage(size, shape, alignment, virtual_device, type->dtype);
-    auto sto = scope->Push(var, MaybeOnDeviceFixed(value, virtual_device));
+    Expr storage = AllocStorage(size, shape, alignment, virtual_device, type->dtype);
+    auto sto = scope->Push(var, MaybeOnDeviceFixed(storage, virtual_device));
 
     // TODO(@jroesch): There is a bug with typing based on the constant shape.
     auto tensor = AllocTensor(sto, shape, type->dtype, /*assert_shape=*/type->shape);
@@ -370,12 +366,8 @@ class DialectRewriter : public transform::DeviceAwareExprMutator {
       // Alignment is directly captured in the instruction so don't wrap in "on_device".
       auto alignment = ComputeAlignment(out_type->dtype);
       Var sto_var("storage_" + std::to_string(i), Type(nullptr));
-      Expr val;
-      //if (virtual_device->memory_scope.empty() || virtual_device->memory_scope == "global")
-          val = AllocStorage(size, alignment, virtual_device, out_type->dtype);
-      //else
-      //    val = AllocTextureStorage(size, out_shape, alignment, virtual_device, out_type->dtype);
-      storages.push_back(scope->Push(sto_var, MaybeOnDeviceFixed(val, virtual_device)));
+      Expr storage = AllocStorage(size, out_shape, alignment, virtual_device, out_type->dtype);
+      storages.push_back(scope->Push(sto_var, MaybeOnDeviceFixed(storage, virtual_device)));
     }
 
     Array<Expr> outs;
