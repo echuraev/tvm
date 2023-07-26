@@ -595,10 +595,12 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
                    auto size_register = last_register_;
 
                    auto const_shape = AsIgnoringOnDevice<ConstantNode>(args[1]);
-                   ICHECK(const_shape);  // Always a literal.
-                   NDArray shape = const_shape->data;
-                   // TODO(@jroesch): we need to get an RFC done to standarize shape dtype
-                   std::vector<int64_t> raw_shape = ToAllocTensorShape(shape);
+                   std::vector<int64_t> raw_shape;
+                   if (const_shape) {
+                     NDArray shape = const_shape->data;
+                     // TODO(@jroesch): we need to get an RFC done to standarize shape dtype
+                     raw_shape = ToAllocTensorShape(shape);
+                   }
 
                    ICHECK(args[2].as<ConstantNode>());  // Always a literal.
                    NDArray alignment_arr = args[2].as<ConstantNode>()->data;
@@ -614,8 +616,8 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
                    auto dtype = alloc_attrs->dtype;
 
                    Emit(Instruction::AllocStorage(size_register, alignment, dtype,
-                                                  GetDeviceIndex(alloc_attrs->virtual_device), raw_shape,
-                                                  NewRegister()));
+                                                  GetDeviceIndex(alloc_attrs->virtual_device),
+                                                  raw_shape, NewRegister()));
                  })
           .Match("vm.shape_of",
                  [this](const Array<Expr>& args, const Attrs& attrs, const Array<Type>& type_arg) {
