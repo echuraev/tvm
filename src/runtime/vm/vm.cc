@@ -686,8 +686,7 @@ void VirtualMachine::RunLoop(const std::vector<Index>& output_tensor_reg_indices
         }
 
         if (!const_pool_[instr.const_index].defined()) {
-          auto& [dev, mem_scope] =
-              exec_->virtual_devices[exec_->const_device_indexes[instr.const_index]];
+          auto& [dev, mem_scope] = exec_->virtual_devices[exec_->const_device_indexes[instr.const_index]];
           const_pool_[instr.const_index] = CopyTo(constant_obj, dev, mem_scope);
         }
         WriteRegister(instr.dst, const_pool_[instr.const_index]);
@@ -859,13 +858,7 @@ void VirtualMachine::RunLoop(const std::vector<Index>& output_tensor_reg_indices
                 << ", device_index=" << instr.alloc_storage.device_index;
         std::string mem_scope = exec_->virtual_devices[instr.alloc_storage.device_index].second;
 
-        if (instr.alloc_storage.ndim > 0) {
-          storage_obj->buffer =
-              allocator->Alloc(instr.alloc_storage.ndim, instr.alloc_storage.shape,
-                               instr.alloc_storage.dtype_hint, mem_scope);
-        } else {
-          storage_obj->buffer = allocator->Alloc(size, alignment, instr.alloc_storage.dtype_hint);
-        }
+        storage_obj->buffer = allocator->Alloc(instr.alloc_storage.ndim, instr.alloc_storage.shape, instr.alloc_storage.dtype_hint, mem_scope);
         Storage storage(storage_obj);
         WriteRegister(instr.dst, storage);
         OpStopHook();
