@@ -312,6 +312,7 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
       case Opcode::Invoke:
       case Opcode::AllocClosure:
       case Opcode::AllocStorage:
+      case Opcode::AllocTextureStorage:
       case Opcode::ShapeOf:
       case Opcode::ReshapeTensor:
       case Opcode::Move:
@@ -367,11 +368,12 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
     NDArray data = const_node->data;
     size_t const_index = context_->constants.size();
     auto con = GetRef<Constant>(const_node);
-    Index device_index = GetDeviceIndex(GetVirtualDevice(con));
+    auto vd = GetVirtualDevice(con);
+    Index device_index = GetDeviceIndex(vd);
     VLOG(2) << "constant[" << const_index << "] on device[" << device_index << "]";
     context_->const_device_indexes.push_back(device_index);
     context_->constants.push_back(const_node->data);
-    Emit(Instruction::LoadConst(const_index, device_index, NewRegister()));
+    Emit(Instruction::LoadConst(const_index, StrToMemScope(vd->memory_scope), NewRegister()));
   }
 
   void VisitExpr_(const VarNode* var_node) final {
@@ -589,6 +591,30 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
                  })
           .Match("memory.alloc_storage",
                  [this](const Array<Expr>& args, const Attrs& attrs, const Array<Type>& type_arg) {
+                   ICHECK_EQ(args.size(), 2);
+                   // Compute the size of the allocation.
+                   this->VisitExpr(args[0]);
+                   auto size_register = last_register_;
+
+                   ICHECK(args[1].as<ConstantNode>());  // Always a literal.
+                   NDArray alignment_arr = args[1].as<ConstantNode>()->data;
+                   ICHECK_EQ(alignment_arr->dtype.code, 0U)
+                       << "The dtype of constant shape must be int32 or int64, but got "
+                       << DLDataType2String(alignment_arr->dtype);
+                   ICHECK_EQ(alignment_arr->dtype.bits, 64U);
+                   Index alignment = reinterpret_cast<int64_t*>(alignment_arr->data)[0];
+
+                   // Get the dtype hint from the attributes.
+                   auto alloc_attrs = attrs.as<AllocStorageAttrs>();
+                   ICHECK(alloc_attrs != nullptr) << "must be the AllocStorage attrs";
+                   auto dtype = alloc_attrs->dtype;
+
+                   Emit(Instruction::AllocStorage(size_register, alignment, dtype,
+                                                  GetDeviceIndex(alloc_attrs->virtual_device),
+                                                  NewRegister()));
+                 })
+          .Match("memory.alloc_texture_storage",
+                 [this](const Array<Expr>& args, const Attrs& attrs, const Array<Type>& type_arg) {
                    ICHECK_EQ(args.size(), 3);
                    // Compute the size of the allocation.
                    this->VisitExpr(args[0]);
@@ -615,9 +641,10 @@ class VMFunctionCompiler : DeviceAwareExprFunctor<void(const Expr& n)> {
                    ICHECK(alloc_attrs != nullptr) << "must be the AllocStorage attrs";
                    auto dtype = alloc_attrs->dtype;
 
-                   Emit(Instruction::AllocStorage(size_register, alignment, dtype,
-                                                  GetDeviceIndex(alloc_attrs->virtual_device),
-                                                  raw_shape, NewRegister()));
+                   Emit(Instruction::AllocTextureStorage(
+                       size_register, alignment, dtype, GetDeviceIndex(alloc_attrs->virtual_device),
+                       raw_shape.size(), raw_shape,
+                       StrToMemScope(alloc_attrs->virtual_device->memory_scope), NewRegister()));
                  })
           .Match("vm.shape_of",
                  [this](const Array<Expr>& args, const Attrs& attrs, const Array<Type>& type_arg) {
