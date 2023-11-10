@@ -84,15 +84,24 @@ ArgInfo ArgInfo::FromJSON(const ObjectRef& json_obj) {
   throw;
 }
 
-Array<ArgInfo> ArgInfo::FromPrimFunc(const tir::PrimFunc& func) {
+Array<ArgInfo> ArgInfo::FromPrimFunc(const tir::PrimFunc& func, const Map<String, IntImm>& sym_var_hint) {
   using support::AsVector;
   Array<ArgInfo> result;
   result.reserve(func->params.size());
   for (const tir::Var& arg : func->params) {
     if (Optional<tir::Buffer> _buffer = func->buffer_map.Get(arg)) {
       tir::Buffer buffer = _buffer.value();
+      Array<PrimExpr> shape = buffer->shape;
+      for (size_t i = 0; i < shape.size(); i++) {
+        if (const tir::VarNode* v = shape[i].as<tir::VarNode>()) {
+          if (sym_var_hint.count(v->name_hint)) {
+            shape.Set(i, sym_var_hint.at(v->name_hint));
+          }
+        }
+      }
+
       result.push_back(TensorInfo(/*dtype=*/buffer->dtype,
-                                  /*shape=*/AsVector<PrimExpr, int64_t>(buffer->shape)));
+                                  /*shape=*/AsVector<PrimExpr, int64_t>(shape)));
     } else {
       LOG(FATAL) << "ValueError: Unsupported argument type: " << arg;
     }
@@ -100,13 +109,13 @@ Array<ArgInfo> ArgInfo::FromPrimFunc(const tir::PrimFunc& func) {
   return result;
 }
 
-Array<ArgInfo> ArgInfo::FromEntryFunc(const IRModule& mod, bool remove_preproc) {
+Array<ArgInfo> ArgInfo::FromEntryFunc(const IRModule& mod, bool remove_preproc, const Map<String, IntImm>& sym_var_hint) {
   if (remove_preproc) {
     IRModule new_mod =
         tir::transform::RemoveWeightLayoutRewriteBlock(/*skip_ndarray_rewrite*/ true)(mod);
-    return ArgInfo::FromPrimFunc(FindEntryFunc(new_mod));
+    return ArgInfo::FromPrimFunc(FindEntryFunc(new_mod), sym_var_hint);
   }
-  return ArgInfo::FromPrimFunc(FindEntryFunc(mod));
+  return ArgInfo::FromPrimFunc(FindEntryFunc(mod), sym_var_hint);
 }
 
 /******** TensorInfo ********/
@@ -163,7 +172,12 @@ TVM_REGISTER_OBJECT_TYPE(ArgInfoNode);
 TVM_REGISTER_NODE_TYPE(TensorInfoNode);
 
 TVM_REGISTER_GLOBAL("meta_schedule.ArgInfoAsJSON").set_body_method<ArgInfo>(&ArgInfoNode::AsJSON);
-TVM_REGISTER_GLOBAL("meta_schedule.ArgInfoFromPrimFunc").set_body_typed(ArgInfo::FromPrimFunc);
+TVM_REGISTER_GLOBAL("meta_schedule.ArgInfoFromPrimFunc").set_body([](TVMArgs args, TVMRetValue* rv) {
+  ICHECK(args.size() == 1 || args.size() == 2);
+  tir::PrimFunc func = args[0];
+  Map<String, IntImm> sym_var_hint = args.size() > 1 ? args[1] : Map<String, IntImm>();
+  *rv = ArgInfo::FromPrimFunc(func, sym_var_hint);  
+});
 TVM_REGISTER_GLOBAL("meta_schedule.ArgInfoFromEntryFunc").set_body_typed(ArgInfo::FromEntryFunc);
 TVM_REGISTER_GLOBAL("meta_schedule.ArgInfoFromJSON").set_body_typed(ArgInfo::FromJSON);
 TVM_REGISTER_GLOBAL("meta_schedule.TensorInfo")

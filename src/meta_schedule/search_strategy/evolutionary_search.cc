@@ -214,8 +214,14 @@ Array<MeasureCandidate> AssembleCandidates(const std::vector<Schedule>& picks) {
   Array<MeasureCandidate> measure_inputs;
   measure_inputs.reserve(picks.size());
   for (const Schedule& sch : picks) {
-    measure_inputs.push_back(
-        MeasureCandidate(sch, ArgInfo::FromEntryFunc(sch->mod(), /*remove_preproc=*/true)));
+    auto func = tir::FindEntryFunc(sch->mod(), nullptr);
+    Map<String, IntImm> dyn_var_value_map;
+    if (auto opt = func->attrs.GetAttr<Map<String, IntImm>>("metaschedule.hint.dyn_var_value")) {
+      dyn_var_value_map = opt.value();
+    }
+
+    Array<ArgInfo> arg_info = ArgInfo::FromEntryFunc(sch->mod(), /*remove_preproc=*/true, dyn_var_value_map);    
+    measure_inputs.push_back(MeasureCandidate(sch, arg_info));
   }
   return measure_inputs;
 }

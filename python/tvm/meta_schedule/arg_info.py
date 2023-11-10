@@ -51,7 +51,7 @@ class ArgInfo(Object):
         return _ffi_api.ArgInfoFromJSON(json_obj)  # type: ignore # pylint: disable=no-member
 
     @staticmethod
-    def from_prim_func(func: PrimFunc) -> List["ArgInfo"]:
+    def from_prim_func(func: PrimFunc, sym_var_hint) -> List["ArgInfo"]:
         """Extract a list of the argument information from PrimFunc.
 
         Parameters
@@ -64,7 +64,7 @@ class ArgInfo(Object):
         extracted : List[ArgInfo]
             An array of the argument information derived.
         """
-        return _ffi_api.ArgInfoFromPrimFunc(func)  # type: ignore # pylint: disable=no-member
+        return _ffi_api.ArgInfoFromPrimFunc(func, sym_var_hint)  # type: ignore # pylint: disable=no-member
 
     @staticmethod
     def from_entry_func(mod: IRModule, remove_preproc: bool = True) -> List["ArgInfo"]:
