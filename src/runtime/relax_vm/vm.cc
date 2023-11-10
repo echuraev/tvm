@@ -568,6 +568,11 @@ PackedFunc VirtualMachineImpl::GetFunction(const String& name,
       *rv = vm_func.param_names[index];
     });
   } else {
+    PackedFunc p_func = GetFuncFromImports(name);
+    if (p_func != nullptr) {
+      return p_func;
+    }
+
     // default case, look up closure in VM.
     if (Optional<VMClosure> opt = this->GetClosureInternal(name, true)) {
       auto clo = opt.value();
