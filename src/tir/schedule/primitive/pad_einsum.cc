@@ -369,22 +369,30 @@ class PadEinsumBufferReplacer : public StmtExprMutator {
   Map<Block, Block> block_sref_reuse_;
 };
 
-void PadEinsum(ScheduleState self, const StmtSRef& block_sref, const Array<Integer>& padding) {
+void PadEinsum(ScheduleState self, const StmtSRef& block_sref, const Array<PrimExpr>& padding) {
   arith::Analyzer analyzer;
   // Step 1: Input checking and error handling
   const BlockNode* block = TVM_SREF_TO_BLOCK(block_sref);
   BlockRealize realize = GetBlockRealize(self, block_sref);
   StmtSRef scope_sref = GetScopeRoot(self, block_sref, /*require_stage_pipeline=*/true);
   const BlockNode* scope_block = TVM_SREF_TO_BLOCK(scope_sref);
-  InvalidPaddingError::Check(self, GetRef<Block>(block), padding);
+  Array<Integer> pads;
+  pads.reserve(padding.size());
+  for (auto& it : padding) {
+      auto* node = it.as<VarNode>();
+      std::cout << node << std::endl;
+      ICHECK(is_const_int(it) && is_positive_const(it));
+      pads.push_back(it.as<IntImmNode>()->value);
+    }
+  InvalidPaddingError::Check(self, GetRef<Block>(block), pads);
   // Step 2. Extract the Einsum pattern
   ExtractEinsum(self, GetRef<Block>(block));
   // Step 3. Figure out the padding needed
   PadEinsumBufferReplacer replacer;
-  for (int i = 0, n = padding.size(); i < n; ++i) {
+  for (int i = 0, n = pads.size(); i < n; ++i) {
     const IterVar& iter = block->iter_vars[i];
     PrimExpr dom = iter->dom->extent;
-    PrimExpr new_dom = analyzer.Simplify(ceildiv(dom, padding[i]) * padding[i]);
+    PrimExpr new_dom = analyzer.Simplify(ceildiv(dom, pads[i]) * pads[i]);
     if (!analyzer.CanProveEqual(new_dom, dom)) {
       replacer.iter2padded_extents.Set(iter->var, new_dom);
       if (const auto* loop_var = realize->iter_values[i].as<VarNode>()) {
@@ -490,11 +498,11 @@ struct PadEinsumTraits : public UnpackedInstTraits<PadEinsumTraits> {
   static constexpr size_t kNumAttrs = 1;
   static constexpr size_t kNumDecisions = 0;
 
-  static void UnpackedApplyToSchedule(Schedule sch, BlockRV block, Array<Integer> padding) {
+  static void UnpackedApplyToSchedule(Schedule sch, BlockRV block, Array<ExprRV> padding) {
     sch->PadEinsum(block, padding);
   }
 
-  static String UnpackedAsPython(Array<String> outputs, String block, Array<Integer> padding) {
+  static String UnpackedAsPython(Array<String> outputs, String block, Array<ExprRV> padding) {
     PythonAPICall py("pad_einsum");
     py.Input("block", block);
     py.Input("padding", padding);

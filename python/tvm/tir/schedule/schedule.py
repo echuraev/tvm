@@ -3051,6 +3051,17 @@ class Schedule(Object):
 
     ########## Schedule: Layout transformation ##########
 
+    # Probably it is not the right way? Will be use only the first value or not?
+    def _normalize_padding_arg(self, padding: List[Union[ExprRV, int]]) -> List[int]:
+        res = []
+        for pad in padding:
+            if isinstance(pad, int):
+                res.append(pad)
+            if isinstance(pad, ExprRV):
+                res.append(self.get(pad))
+
+        return res
+
     def _normalize_block_arg(self, block: Union[BlockRV, str]) -> BlockRV:
         if isinstance(block, str):
             return self.get_block(block)
@@ -3547,7 +3558,7 @@ class Schedule(Object):
         return _ffi_api.CanDecomposePadding(self, block, loop)  # type: ignore
 
     @type_checked
-    def pad_einsum(self, block: Union[BlockRV, str], padding: List[int]) -> None:
+    def pad_einsum(self, block: Union[BlockRV, str], padding: List[Union[ExprRV, int]]) -> None:
         """Pad the computation of Einsum.
 
         On a block with trivial binding, this primitive pads the iteration domain of the block by
@@ -3638,6 +3649,7 @@ class Schedule(Object):
 
         """
         block = self._normalize_block_arg(block)
+        #padding = self._normalize_padding_arg(padding)
         return _ffi_api.SchedulePadEinsum(  # type: ignore # pylint: disable=no-member
             self, block, padding
         )

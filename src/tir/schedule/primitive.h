@@ -671,7 +671,7 @@ TVM_DLL StmtSRef DecomposePadding(ScheduleState self, const StmtSRef& block_sref
  * \param padding The padding for each block iter.
  */
 TVM_DLL void PadEinsum(ScheduleState self, const StmtSRef& block_sref,
-                       const Array<Integer>& padding);
+                       const Array<PrimExpr>& padding);
 /******** Schedule: Buffer transformation ********/
 /*!
  * \brief Compute the target buffer via rolling buffering.

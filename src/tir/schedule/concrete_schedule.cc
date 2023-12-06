@@ -942,8 +942,58 @@ BlockRV ConcreteScheduleNode::DecomposePadding(const BlockRV& block_rv, const Lo
   return CreateRV<BlockRV>(result);
 }
 
-void ConcreteScheduleNode::PadEinsum(const BlockRV& block_rv, const Array<Integer>& padding) {
+void ConcreteScheduleNode::PadEinsum(const BlockRV& block_rv, const Array<ExprRV>& padding) {
+  //class NotSingleInferFactorError : public ScheduleError {
+  // public:
+  //  explicit NotSingleInferFactorError(IRModule mod) : mod_(mod) {}
+
+  //  String FastErrorString() const final {
+  //    return "ScheduleError: only one factor can be specified as -1 or none";
+  //  }
+
+  //  String DetailRenderTemplate() const final {
+  //    return "Only one factor can be specified as -1 or none";
+  //  }
+
+  //  IRModule mod() const final { return mod_; }
+  //  Array<ObjectRef> LocationsOfInterest() const final { return {}; }
+
+  //  IRModule mod_;
+  //};
+  //class NonPositiveFactorError : public ScheduleError {
+  // public:
+  //  explicit NonPositiveFactorError(IRModule mod, int64_t factor, size_t idx)
+  //      : mod_(std::move(mod)), factor_(factor), idx_(idx) {}
+
+  //  String FastErrorString() const final {
+  //    return "ScheduleError: All the constant factors are required to be positive. However, some "
+  //           "constant input factor is zero or negative.";
+  //  }
+  //  String DetailRenderTemplate() const final {
+  //    std::ostringstream os;
+  //    os << "All the constant factors are required to be positive. However, the factor at position "
+  //       << idx_ << " is " << factor_;
+  //    return os.str();
+  //  }
+  //  IRModule mod() const final { return mod_; }
+  //  Array<ObjectRef> LocationsOfInterest() const final { return {}; }
+
+  // private:
+  //  IRModule mod_;
+  //  int64_t factor_;
+  //  size_t idx_;
+  //};
+
   TVM_TIR_SCHEDULE_BEGIN();
+  //Array<PrimExpr> pads;
+  //pads.reserve(padding.size());
+  //for (size_t i = 0; i < padding.size(); i++) {
+  //    PrimExpr val = this->Get(padding[i]);
+  //    if (is_const_int(val) && !is_positive_const(val)) {
+  //      throw NonPositiveFactorError(state_->mod, val.as<IntImmNode>()->value, i);
+  //    }
+  //    pads.push_back(val);
+  //  }
   tir::PadEinsum(state_, this->GetSRef(block_rv), padding);
   TVM_TIR_SCHEDULE_END("pad-einsum", this->error_render_level_);
   this->state_->DebugVerify();
