@@ -798,7 +798,7 @@ class ScheduleNode : public runtime::Object {
    * The size of the producer buffers are infered from the padding size of the Einsum computation.
    * The producer buffers are padded by the initial value of the corresponding reduction.
    */
-  virtual void PadEinsum(const BlockRV& block_rv, const Array<ExprRV>& padding) = 0;
+  virtual void PadEinsum(const BlockRV& block_rv, const Array<Integer>& padding) = 0;
 
   /******** Schedule: Buffer transformation ********/
   /*!

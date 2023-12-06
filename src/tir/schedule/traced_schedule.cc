@@ -702,7 +702,7 @@ BlockRV TracedScheduleNode::DecomposePadding(const BlockRV& block_rv, const Loop
   return new_block;
 }
 
-void TracedScheduleNode::PadEinsum(const BlockRV& block_rv, const Array<ExprRV>& padding) {
+void TracedScheduleNode::PadEinsum(const BlockRV& block_rv, const Array<Integer>& padding) {
   ConcreteScheduleNode::PadEinsum(block_rv, padding);
   static const InstructionKind& kind = InstructionKind::Get("PadEinsum");
   trace_->Append(/*inst=*/Instruction(
