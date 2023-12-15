@@ -163,7 +163,13 @@ inline Optional<Array<MeasureCandidate>> ReplayTraceNode::State::GenerateMeasure
       tir::Trace new_trace = tir::Trace(trace->insts, {});
       if (Optional<tir::Schedule> opt_sch = pp.Apply(mod, new_trace, &rand_state)) {
         tir::Schedule sch = opt_sch.value();
-        Array<ArgInfo> args_info = ArgInfo::FromEntryFunc(sch->mod(), /*remove_preproc=*/true);
+        auto func = tir::FindEntryFunc(sch->mod(), nullptr);
+        Map<String, IntImm> dyn_var_value_map;
+        if (auto opt = func->attrs.GetAttr<Map<String, IntImm>>("metaschedule.hint.dyn_var_value")) {
+          dyn_var_value_map = opt.value();
+        }
+
+        Array<ArgInfo> args_info = ArgInfo::FromEntryFunc(sch->mod(), /*remove_preproc=*/true, dyn_var_value_map);
         per_task_result.Set(task_id, MeasureCandidate(sch, args_info));
         break;
       }
