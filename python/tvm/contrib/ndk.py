@@ -21,9 +21,12 @@ from __future__ import absolute_import as _abs
 import subprocess
 import os
 import shutil
+import tempfile
+from pathlib import Path
 from .._ffi.base import py_str
 from . import utils as _utils, tar as _tar
 from .cc import get_target_by_dump_machine
+from tvm._ffi import register_func
 
 
 def create_shared(output, objects, options=None):
@@ -120,6 +123,15 @@ def create_staticlib(output, inputs):
         raise RuntimeError(msg)
 
     shutil.move(tmp_output, output)
+
+
+@register_func("meta_schedule.builder.export_ndk")
+def _ndk_export(mod):
+    tmp_dir = tempfile.mkdtemp()
+    binary_name = "tmp_binary.so"
+    binary_path = Path(tmp_dir) / binary_name
+    mod.export_library(binary_path, fcompile=create_shared)
+    return str(binary_path)
 
 
 create_staticlib.output_format = "a"
