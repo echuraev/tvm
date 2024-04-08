@@ -222,6 +222,7 @@ class Parameter(Tensor):
         self,
         shape: Sequence[Union[int, str, tir.PrimExpr]],
         dtype: Optional[str] = None,
+        name: Optional[str] = None,
     ) -> None:
         """Create a parameter with given shape and dtype. The parameter is not bound to any
         concrete values.
@@ -236,7 +237,9 @@ class Parameter(Tensor):
         """
         if dtype is None:
             dtype = get_default_dtype()
-        super().__init__(_expr=Tensor.placeholder(shape, dtype=dtype, name="param")._expr)
+        if name is None:
+            name = "param"
+        super().__init__(_expr=Tensor.placeholder(shape, dtype=dtype, name=name)._expr)
         self._data = None
         self.attrs = OrderedDict()
 

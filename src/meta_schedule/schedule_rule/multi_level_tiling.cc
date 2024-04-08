@@ -102,14 +102,19 @@ void MultiLevelTilingNode::InitializeWithTuneContext(const TuneContext& context)
 
 // Entry of the mega rule; Inherited from ScheduleRuleNode
 Array<Schedule> MultiLevelTilingNode::Apply(const Schedule& sch, const BlockRV& block_rv) {
+    std::cout << "filter_fn_: " << filter_fn_
+              << ", NeedsMultiLevelTiling(sch->state(), sch->GetSRef(block_rv)): " << NeedsMultiLevelTiling(sch->state(), sch->GetSRef(block_rv)) << std::endl;
   if ((filter_fn_ && filter_fn_.value()(sch, sch->GetSRef(block_rv))) ||
       NeedsMultiLevelTiling(sch->state(), sch->GetSRef(block_rv))) {
+      std::cout << "block_rv: " << block_rv << std::endl;
     sch->Annotate(block_rv, tir::attr::meta_schedule_tiling_structure, structure);
+      std::cout << "sch: " << sch << std::endl;
 
     Array<Schedule> results;
     for (auto&& state : ApplySubRules({State(sch, block_rv)})) {
       results.push_back(std::move(state->sch));
     }
+    std::cout << "size: " << results.size() << std::endl;
     return results;
   }
   return {sch};

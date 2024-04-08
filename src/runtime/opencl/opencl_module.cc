@@ -72,6 +72,8 @@ class OpenCLWrappedFunc {
       }
       OPENCL_CALL(clSetKernelArg(kernel, i, arg_size_[i], arg));
     }
+
+    LOG(WARNING) << "Run kernel: " << func_name_;
     cl_command_queue queue = w_->GetQueue(t->device);
     ThreadWorkLoad wl = launch_param_config_.Extract(args);
     cl_uint work_dim = static_cast<cl_uint>(launch_param_config_.work_dim());
@@ -230,6 +232,12 @@ cl_kernel OpenCLModuleNode::InstallKernel(cl::OpenCLWorkspace* w, cl::OpenCLThre
     // create program
     if (fmt_ == "cl") {
       const char* s = parsed_kernels_[func_name].c_str();
+      //std::cout << "Kernel source: " << std::endl;
+      //std::cout << parsed_kernels_[func_name].c_str() << std::endl;
+      //std::cout << "Kernel source! " << std::endl;
+      LOG(WARNING) << "Kernel source: ";
+      LOG(WARNING) << parsed_kernels_[func_name].c_str();
+      LOG(WARNING) << "Kernel source! ";
       size_t len = parsed_kernels_[func_name].length();
       cl_int err;
       programs_[func_name][device_id] =

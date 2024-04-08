@@ -325,6 +325,7 @@ class MatmulTensorization(GPUScheduleRule):
         target: Target,
         _: bool,
     ) -> Optional[tir.Schedule]:
+        print("1. dlight/gpu/matmul.py")
         from tvm.tir.tensor_intrin.cuda import (  # pylint: disable=import-outside-toplevel
             get_wmma_intrin_group,
         )
@@ -546,6 +547,7 @@ class MatmulInt8Tensorization(GPUScheduleRule):
         target: Target,
         _: bool,
     ) -> Optional[tir.Schedule]:
+        print("2. dlight/gpu/matmul.py")
         from tvm.tir.tensor_intrin.cuda import (  # pylint: disable=import-outside-toplevel
             get_wmma_intrin_group,
         )
@@ -798,6 +800,7 @@ class Matmul(GPUScheduleRule):
         target: Target,
         _: bool,
     ) -> Optional[tir.Schedule]:
+        print("3. dlight/gpu/matmul.py")
         if not isinstance(func, tir.PrimFunc) or not self.is_target_available(target):
             return None
         sch = tir.Schedule(func)

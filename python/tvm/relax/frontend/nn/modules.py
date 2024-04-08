@@ -104,14 +104,18 @@ class Linear(Module):
         bias: bool = True,
         dtype: Optional[str] = None,
         out_dtype: Optional[str] = None,
+        name_w: Optional[str] = None,
+        name_b: Optional[str] = None,
     ):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.out_dtype = out_dtype
-        self.weight = Parameter((out_features, in_features), dtype)
+        self.name_w = name_w
+        self.name_b = name_b
+        self.weight = Parameter((out_features, in_features), dtype, name=name_w)
         if bias:
-            self.bias = Parameter((out_features,), dtype=dtype if out_dtype is None else out_dtype)
+            self.bias = Parameter((out_features,), dtype=dtype if out_dtype is None else out_dtype, name=name_b)
         else:
             self.bias = None
 
@@ -628,10 +632,12 @@ class Embedding(Module):
         num: Union[int, str, tir.PrimExpr],
         dim: Union[int, str, tir.PrimExpr],
         dtype: Optional[str] = None,
+        name: Optional[str] = None,
     ):
         self.num = num
         self.dim = dim
-        self.weight = Parameter((num, dim), dtype=dtype)
+        self.name = name
+        self.weight = Parameter((num, dim), dtype=dtype, name=name)
 
     def forward(self, x: Tensor):
         """

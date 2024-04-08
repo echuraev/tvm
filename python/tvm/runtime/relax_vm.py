@@ -250,7 +250,9 @@ class VirtualMachine(object):
                 new_args[idx] = kwargs[k]
                 cnt += 1
             else:
-                print(f'Warning: Keyword argument "{k}" is unused in {func_name}')
+                print(f'Warning: Keyword argument "{k}" is unused in {func_name}, {func_params}')
+        print(len(args), " + ", cnt, " == ", len(func_params))
+        print(func_params)
         assert len(args) + cnt == len(func_params)
         idx = 0
         for i, arg in enumerate(new_args):

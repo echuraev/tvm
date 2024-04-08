@@ -175,6 +175,7 @@ class GEMV(GPUScheduleRule):
         target: Target,
         _: bool,
     ) -> Union[None, tir.Schedule, List[tir.Schedule]]:
+        print("1. dlight/gpu/gemv.py")
         if not isinstance(func, tir.PrimFunc) or not self.is_target_available(target):
             return None
         sch = tir.Schedule(func)
